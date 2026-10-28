@@ -1,0 +1,50 @@
+
+# this file is managed with ansible
+
+User-agent: *
+Disallow: /news/*?*
+Disallow: /*?*monthnum=
+Disallow: /*?*post_tag=
+Disallow: /*?*orderby=
+Disallow: /*?*author=
+Disallow: /*?*tribe_events_cat=
+Disallow: /*ical=1
+Disallow: /cgi-bin/
+Disallow: /bin/
+Disallow: /aliases/
+Disallow: /src/
+Disallow: /tmp/
+Disallow: /files/
+Disallow: /naha/
+Disallow: /orgs/list/
+Disallow: /classhomepages/
+Disallow: /it/classroom-database/
+Disallow: /newstudents/track-your-progress/
+Disallow: /catalog/*/admissions/
+Disallow: /apps/olecard/checkbalance/
+Disallow: /apps/fram
+Disallow: /catalog/ 
+Disallow: /calendar/*?*
+Disallow: /calendar/events/*?*
+Disallow: /calendar/page/ 
+Disallow: /*ical=1
+
+# per https://simtechdev.com/blog/good-and-bad-bots-to-control-to-save-server-resources-and-improve-performance/
+
+User-agent: MJ12Bot
+Disallow: /
+User-agent: PetalBot
+Disallow: /
+User-agent: AspiegelBot
+Disallow: /
+User-agent: AhrefsBot
+Disallow: /
+User-agent: SEMrushBot
+Disallow: /
+User-agent: DotBot
+Disallow: /
+User-agent: MauiBot
+Disallow: /
+User-agent: bingbot
+Disallow: /calendar
+

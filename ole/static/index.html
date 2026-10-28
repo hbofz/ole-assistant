@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lefse, your St. Olaf helper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Fredoka:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --sky: #e6eef6;
+  --sky-deep: #d3e0ed;
+  --paper: #ffffff;
+  --ink: #1d2b53;
+  --ink-soft: #4f5b7a;
+  --gold: #f2b632;
+  --gold-deep: #a8740a;
+  --berry: #c8324a;
+  --dough: #f6e3bc;
+  --toast: #b3702f;
+  --line: #c4d3e3;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sky: #0f1a33;
+    --sky-deep: #16244a;
+    --paper: #1a2a4f;
+    --ink: #eaf0fa;
+    --ink-soft: #aab6cf;
+    --gold-deep: #f2b632;
+    --berry: #ff7a8f;
+    --line: #2b3d68;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--sky);
+  color: var(--ink);
+  font: 17px/1.55 "Atkinson Hyperlegible", system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+button, textarea { font: inherit; color: inherit; }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; border-radius: 8px; }
+
+/* header */
+.top {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px;
+  max-width: 760px; width: 100%; margin: 0 auto;
+}
+.top svg { width: 36px; height: 36px; flex: none; }
+.brand { font-family: Fredoka, sans-serif; font-weight: 600; font-size: 22px; line-height: 1; }
+.brand small { display: block; font: 400 13px/1.3 "Atkinson Hyperlegible", sans-serif; color: var(--ink-soft); margin-top: 3px; }
+.new-chat {
+  margin-left: auto; border: 2px solid var(--line); background: transparent;
+  border-radius: 999px; padding: 6px 14px; font-size: 15px; cursor: pointer;
+}
+.new-chat:hover { border-color: var(--ink-soft); }
+.new-chat[hidden] { display: none; }
+
+/* conversation */
+main { flex: 1; overflow-y: auto; }
+.thread { max-width: 760px; margin: 0 auto; padding: 8px 16px 24px; }
+
+.hello { text-align: center; padding: 6vh 0 12px; }
+.hello .big { width: min(210px, 52vw); height: auto; display: block; margin: 0 auto 8px; }
+.hello h1 {
+  font-family: Fredoka, sans-serif; font-weight: 600;
+  font-size: clamp(34px, 7vw, 52px); line-height: 1.1; margin: 0 0 10px;
+}
+.hello p { color: var(--ink-soft); max-width: 34em; margin: 0 auto 24px; }
+.starters { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.starters button {
+  background: var(--paper); border: 2px solid var(--line); border-radius: 18px;
+  padding: 10px 16px; cursor: pointer; text-align: left; max-width: 330px; font-size: 15.5px;
+}
+.starters button:hover { border-color: var(--gold); }
+
+.msg { display: flex; gap: 10px; margin: 18px 0; align-items: flex-start; }
+.msg.you { justify-content: flex-end; }
+.msg .avatar { width: 40px; height: 40px; flex: none; margin-top: 2px; }
+.bubble { padding: 12px 16px; border-radius: 20px; max-width: min(36em, 100%); overflow-wrap: anywhere; }
+.you .bubble { background: var(--gold); color: #1d2b53; border-bottom-right-radius: 6px; white-space: pre-wrap; }
+.bot .bubble { background: var(--paper); border-bottom-left-radius: 6px; box-shadow: 0 1px 0 var(--line); }
+.bot .bubble > :first-child { margin-top: 0; }
+.bot .bubble > :last-child { margin-bottom: 0; }
+.bubble p, .bubble ul, .bubble ol { margin: 0 0 10px; }
+.bubble ul, .bubble ol { padding-left: 22px; }
+.bubble li { margin: 3px 0; }
+.bubble a { color: var(--ink); text-decoration-color: var(--gold); text-decoration-thickness: 2px; text-underline-offset: 2px; }
+.cite {
+  display: inline-grid; place-items: center;
+  min-width: 19px; height: 19px; padding: 0 4px; margin: 0 1px;
+  border-radius: 999px; background: var(--berry); color: #fff !important;
+  font: 700 11.5px/1 "Atkinson Hyperlegible", sans-serif; text-decoration: none !important;
+  vertical-align: 3px;
+}
+.cite:hover { filter: brightness(1.12); }
+.error { color: var(--berry); font-weight: 700; }
+
+.sources { margin-top: 12px; padding-top: 10px; border-top: 2px dashed var(--line); }
+.sources h2 { font: 600 15px/1.3 Fredoka, sans-serif; margin: 0 0 6px; color: var(--ink-soft); }
+.sources ol { list-style: none; padding: 0; margin: 0; }
+.sources li { display: flex; gap: 8px; align-items: baseline; margin: 5px 0; font-size: 15px; }
+.sources li .cite { flex: none; vertical-align: 0; }
+.sources a { text-decoration: none; }
+.sources a:hover span:first-child { text-decoration: underline; text-decoration-color: var(--gold); }
+.sources .where { color: var(--ink-soft); font-size: 13.5px; display: block; }
+
+.thinking { display: flex; align-items: center; gap: 10px; color: var(--ink-soft); font-style: italic; }
+
+/* the one bold move: Lefse flips on the griddle while thinking */
+.flip { animation: flip 1.4s cubic-bezier(.5, 0, .3, 1) infinite; transform-origin: 50% 60%; }
+@keyframes flip {
+  0% { transform: translateY(0) rotateX(0); }
+  35% { transform: translateY(-14px) rotateX(180deg); }
+  60%, 100% { transform: translateY(0) rotateX(360deg); }
+}
+.blink .eye { animation: blink 5s infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.1); } }
+@media (prefers-reduced-motion: reduce) {
+  .flip, .blink .eye { animation: none; }
+}
+
+/* composer */
+.composer-wrap { padding: 8px 16px 14px; background: linear-gradient(transparent, var(--sky) 30%); }
+form {
+  max-width: 760px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end;
+  background: var(--paper); border: 2px solid var(--line); border-radius: 26px; padding: 6px 6px 6px 18px;
+}
+form:focus-within { border-color: var(--gold); }
+textarea {
+  flex: 1; border: 0; background: transparent; resize: none; outline: none;
+  padding: 9px 0; max-height: 180px; line-height: 1.45;
+}
+textarea:focus-visible { outline: none; } /* the whole pill shows focus instead */
+textarea::placeholder { color: var(--ink-soft); }
+.send {
+  width: 44px; height: 44px; flex: none; border-radius: 50%; border: 0; cursor: pointer;
+  background: var(--gold); color: #1d2b53; display: grid; place-items: center;
+}
+.send:disabled { opacity: .45; cursor: default; }
+.send svg { width: 22px; height: 22px; }
+.fine-print { max-width: 760px; margin: 8px auto 0; text-align: center; font-size: 13px; color: var(--ink-soft); }
+
+@media (max-width: 520px) {
+  body { font-size: 16px; }
+  .msg .avatar { width: 32px; height: 32px; }
+  .bubble { padding: 10px 13px; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="lefse" viewBox="0 0 120 120">
+    <path d="M60 8c13 0 21 3 31 10s16 15 19 27 2 25-4 35-14 19-27 24-26 6-38 1-21-12-27-24-7-25-3-37S20 21 31 14 47 8 60 8z" fill="var(--dough)" stroke="#e2c58e" stroke-width="2.5"/>
+    <g fill="var(--toast)">
+      <ellipse cx="30" cy="38" rx="6" ry="4" opacity=".55"/>
+      <ellipse cx="86" cy="30" rx="4" ry="3" opacity=".5"/>
+      <ellipse cx="94" cy="72" rx="7" ry="5" opacity=".45"/>
+      <ellipse cx="40" cy="92" rx="5" ry="3.5" opacity=".5"/>
+      <ellipse cx="70" cy="98" rx="3" ry="2.2" opacity=".55"/>
+      <ellipse cx="22" cy="66" rx="3" ry="2.4" opacity=".5"/>
+      <ellipse cx="62" cy="22" rx="3.5" ry="2.4" opacity=".4"/>
+      <circle cx="78" cy="48" r="1.8" opacity=".5"/>
+      <circle cx="47" cy="30" r="1.6" opacity=".5"/>
+      <circle cx="84" cy="88" r="1.6" opacity=".5"/>
+    </g>
+    <ellipse cx="38" cy="70" rx="8" ry="5" fill="#ef8a9a" opacity=".55"/>
+    <ellipse cx="82" cy="70" rx="8" ry="5" fill="#ef8a9a" opacity=".55"/>
+    <g class="eye"><ellipse cx="46" cy="58" rx="5" ry="6.5" fill="#1d2b53"/><circle cx="47.8" cy="55.6" r="1.8" fill="#fff"/></g>
+    <g class="eye"><ellipse cx="74" cy="58" rx="5" ry="6.5" fill="#1d2b53"/><circle cx="75.8" cy="55.6" r="1.8" fill="#fff"/></g>
+    <path d="M53 71q7 7 14 0" fill="none" stroke="#1d2b53" stroke-width="3" stroke-linecap="round"/>
+  </symbol>
+</svg>
+
+<header class="top">
+  <svg aria-hidden="true"><use href="#lefse"/></svg>
+  <div class="brand">Lefse<small>St. Olaf helper (demo)</small></div>
+  <button class="new-chat" id="newChat" hidden>New chat</button>
+</header>
+
+<main id="scroller">
+  <div class="thread" id="thread">
+    <section class="hello" id="hello">
+      <svg class="big blink" viewBox="0 0 120 120" role="img" aria-label="Lefse, a smiling round flatbread"><use href="#lefse"/></svg>
+      <h1>Hei! I'm Lefse.</h1>
+      <p>Ask me anything about St. Olaf: classes, majors, registering, the Piper Center, internships, campus life. Every answer links to the page it came from.</p>
+      <div class="starters" id="starters">
+        <button>What do I need for a computer science major?</button>
+        <button>How do I get academic credit for an internship?</button>
+        <button>How do I book a meeting with a career coach?</button>
+        <button>Is there funding for unpaid summer internships?</button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="composer-wrap">
+  <form id="form">
+    <textarea id="q" rows="1" maxlength="2000" placeholder="Ask Lefse about St. Olaf" aria-label="Your question"></textarea>
+    <button class="send" id="send" aria-label="Send" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+    </button>
+  </form>
+  <p class="fine-print">A Piper Center research demo. Lefse answers from St. Olaf's public web pages, so double-check anything important with the office it links to.<span id="updated"></span></p>
+</div>
+
+<script src="/static/render.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const thread = $("thread"), scroller = $("scroller"), q = $("q"), send = $("send");
+let history = [];
+let busy = false;
+
+function addMessage(who) {
+  const el = document.createElement("div");
+  el.className = `msg ${who}`;
+  if (who === "bot") el.innerHTML = `<svg class="avatar" viewBox="0 0 120 120" aria-hidden="true"><use href="#lefse"/></svg>`;
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  el.appendChild(bubble);
+  thread.appendChild(el);
+  return {el, bubble};
+}
+
+fetch("/api/status").then((r) => r.json()).then(({updated}) => {
+  if (updated) $("updated").textContent = ` Knowledge updated ${new Date(updated).toLocaleDateString(undefined, {month: "long", day: "numeric", year: "numeric"})}.`;
+}).catch(() => {});
+
+function scrollDown() { scroller.scrollTop = scroller.scrollHeight; }
+
+function setBusy(on) {
+  busy = on;
+  send.disabled = on || !q.value.trim();
+  q.disabled = on;
+  if (!on) q.focus();
+}
+
+async function ask(question) {
+  question = question.trim();
+  if (!question || busy) return;
+  $("hello")?.remove();
+  $("newChat").hidden = false;
+  addMessage("you").bubble.textContent = question;
+  const {el, bubble} = addMessage("bot");
+  const avatar = el.querySelector(".avatar");
+  avatar.classList.add("flip");
+  bubble.innerHTML = `<div class="thinking">Flipping through St. Olaf pages</div>`;
+  scrollDown();
+  setBusy(true);
+
+  let text = "", plain = "", sources = {}, failed = false;
+  const paint = () => {
+    const list = Object.values(sources);
+    bubble.innerHTML = render(text, sources) + (list.length ? `
+      <div class="sources"><h2>Where I found this</h2><ol>${list.map((s) => `
+        <li><span class="cite">${s.n}</span><a href="${esc(s.url)}" target="_blank" rel="noopener">
+          <span>${esc(s.title.split(" – ")[0])}</span><span class="where">${esc(s.title.split(" – ")[1] || hostPath(s.url))}</span></a></li>`).join("")}
+      </ol></div>` : "");
+  };
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({question, history}),
+    });
+    if (!res.ok) {
+      const detail = (await res.json().catch(() => ({}))).detail;
+      throw new Error(typeof detail === "string" ? detail : `The server answered with error ${res.status}.`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+        if (!chunk.startsWith("data: ")) continue;
+        const ev = JSON.parse(chunk.slice(6));
+        if (ev.type === "text") { text += ev.text; plain += ev.text; avatar.classList.remove("flip"); }
+        else if (ev.type === "cite") { text += `\u0001${ev.n}\u0001`; }
+        else if (ev.type === "sources") { for (const s of ev.items) sources[s.n] = s; }
+        else if (ev.type === "error") { failed = true; text += (text ? "\n\n" : "") + ev.message; avatar.classList.remove("flip"); }
+        paint();
+        if (ev.type === "error") bubble.querySelector("p:last-of-type")?.classList.add("error");
+        scrollDown();
+      }
+    }
+    if (!text) { failed = true; text = "I didn't get an answer back. Try asking again."; paint(); }
+  } catch (err) {
+    failed = true;
+    avatar.classList.remove("flip");
+    bubble.innerHTML = `<p class="error">${esc(err.message || "I couldn't reach the Lefse server. Make sure it's running, then try again.")}</p>`;
+  }
+  avatar.classList.remove("flip");
+  if (!failed) history.push({role: "user", content: question}, {role: "assistant", content: plain});
+  setBusy(false);
+  scrollDown();
+}
+
+$("form").addEventListener("submit", (e) => { e.preventDefault(); const v = q.value; q.value = ""; autosize(); ask(v); });
+q.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("form").requestSubmit(); }
+});
+function autosize() { q.style.height = "auto"; q.style.height = Math.min(q.scrollHeight, 180) + "px"; send.disabled = busy || !q.value.trim(); }
+q.addEventListener("input", autosize);
+$("starters").addEventListener("click", (e) => { if (e.target.closest("button")) ask(e.target.closest("button").textContent); });
+$("newChat").addEventListener("click", () => location.reload());
+q.focus();
+</script>
+</body>
+</html>

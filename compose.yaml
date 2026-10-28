@@ -1,0 +1,8 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.19.2
+    ports:
+      - "127.0.0.1:6333:6333"  # local only: Qdrant has no auth
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    restart: unless-stopped

@@ -1,0 +1,117 @@
+from dataclasses import dataclass
+from functools import cache
+
+from fastembed import SparseTextEmbedding
+from openai import OpenAI
+from fastembed.rerank.cross_encoder import TextCrossEncoder
+from qdrant_client import QdrantClient, models
+
+from ole.chunk import chunk_id
+
+from ole.config import (ANSWER_K, COLLECTION, DENSE_DIM, DENSE_MODEL, PER_URL_MAX, QDRANT_URL, RERANK_K, RERANK_MODEL,
+                        RETRIEVE_K, SPARSE_MODEL)
+
+EMBED_BATCH = 256
+
+
+@dataclass
+class Hit:
+    id: str
+    url: str
+    title: str
+    heading_path: str
+    text: str
+    lastmod: str | None
+    score: float
+    index: int = 0
+
+    @property
+    def embed_text(self) -> str:
+        head = f"{self.title}\n{self.heading_path}" if self.heading_path else self.title
+        return f"{head}\n\n{self.text}"
+
+
+@cache
+def openai_client() -> OpenAI:
+    return OpenAI()
+
+
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    out = []
+    for i in range(0, len(texts), EMBED_BATCH):
+        r = openai_client().embeddings.create(model=DENSE_MODEL, input=texts[i:i + EMBED_BATCH], dimensions=DENSE_DIM)
+        out += [d.embedding for d in sorted(r.data, key=lambda d: d.index)]
+    return out
+
+
+@cache
+def sparse_model() -> SparseTextEmbedding:
+    return SparseTextEmbedding(SPARSE_MODEL)
+
+
+@cache
+def reranker() -> TextCrossEncoder:
+    return TextCrossEncoder(RERANK_MODEL)
+
+
+@cache
+def qdrant() -> QdrantClient:
+    return QdrantClient(QDRANT_URL)
+
+
+def diversify(hits: list[Hit], per_url: int = PER_URL_MAX) -> list[Hit]:
+    counts: dict[str, int] = {}
+    out = []
+    for h in hits:
+        counts[h.url] = counts.get(h.url, 0) + 1
+        if counts[h.url] <= per_url:
+            out.append(h)
+    return out
+
+
+def search(query: str, k: int = ANSWER_K) -> list[Hit]:
+    dense = embed_texts([query])[0]
+    sparse = next(iter(sparse_model().query_embed(query)))
+    res = qdrant().query_points(
+        COLLECTION,
+        prefetch=[
+            models.Prefetch(query=dense, using="dense", limit=RETRIEVE_K),
+            models.Prefetch(query=models.SparseVector(indices=sparse.indices.tolist(), values=sparse.values.tolist()),
+                            using="bm25", limit=RETRIEVE_K),
+        ],
+        query=models.FusionQuery(fusion=models.Fusion.RRF),
+        limit=RETRIEVE_K,
+        with_payload=True,
+    )
+    hits = [Hit(id=str(p.id), score=p.score, **{f: p.payload.get(f) for f in
+                ("url", "title", "heading_path", "text", "lastmod")}, index=p.payload.get("index", 0)) for p in res.points]
+    if RERANK_K:  # 0 = trust the hybrid (RRF) order
+        hits = hits[:RERANK_K]
+        for h, s in zip(hits, reranker().rerank(query, [h.embed_text for h in hits])):
+            h.score = float(s)
+        hits.sort(key=lambda h: h.score, reverse=True)
+    return expand(diversify(hits)[:k])
+
+
+def merge_neighbors(hits: list[Hit], texts: dict[tuple[str, int], str]) -> list[Hit]:
+    """Glue each hit's previous and next chunk onto it (unless that chunk is a hit itself)."""
+    taken = {(h.url, h.index) for h in hits}
+    for h in hits:
+        parts = [texts.get((h.url, h.index - 1)) if (h.url, h.index - 1) not in taken else None, h.text,
+                 texts.get((h.url, h.index + 1)) if (h.url, h.index + 1) not in taken else None]
+        h.text = "\n\n".join(p for p in parts if p)
+    return hits
+
+
+def expand(hits: list[Hit]) -> list[Hit]:
+    ids = [chunk_id(h.url, i) for h in hits for i in (h.index - 1, h.index + 1) if i >= 0]
+    found = qdrant().retrieve(COLLECTION, ids, with_payload=True) if ids else []
+    texts = {(p.payload["url"], p.payload.get("index", 0)): p.payload["text"] for p in found}
+    return merge_neighbors(hits, texts)
+
+
+def warmup() -> None:
+    """Load the three local models so the first question isn't slow."""
+    next(iter(sparse_model().query_embed("warm up")))
+    if RERANK_K:
+        list(reranker().rerank("warm up", ["warm up"]))

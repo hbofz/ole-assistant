@@ -65,8 +65,7 @@ uv run python -m ole.evaluate --model claude-haiku-5-5
 
 The eval passes when retrieval finds the right page for at least 90% of answerable questions, at least 85% of answers are graded correct, and Lefse gives zero confident answers to questions the site can't answer.
 
-## Notes for a real deployment
+## Notes for a real deployment?
 
-- Ask St. Olaf IT to allowlist the crawler. Their firewall blocks anything faster than about one page every few seconds.
 - Schedule `ole.refresh` (above).
 - Docs fetched through the Drive MCP don't refresh on their own.

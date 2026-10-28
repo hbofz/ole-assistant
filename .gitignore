@@ -3,3 +3,4 @@ data/
 __pycache__/
 .venv/
 .superpowers/
+docs/superpowers/

@@ -96,7 +96,9 @@ def score(row: dict, model: str, rep: int = 0, retrieval_only: bool = False, vot
     res["retrieval_hit"] = res["rank"] is not None if row["answerable"] else None
     if retrieval_only:
         return res
-    key = CACHE / f"{cache_key(model, row['question'], history, [h.id for h in hits], rep)}.json"
+    # hit ids plus a hash of their text: the same hit can come with or without a glued-on neighbor chunk
+    ids = [f"{h.id}:{hashlib.sha256(h.text.encode()).hexdigest()[:12]}" for h in hits]
+    key = CACHE / f"{cache_key(model, row['question'], history, ids, rep)}.json"
     if key.exists():
         cached = json.loads(key.read_text())
     else:

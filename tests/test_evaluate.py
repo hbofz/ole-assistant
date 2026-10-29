@@ -97,3 +97,17 @@ def test_compare_pairs_items_across_reps(monkeypatch, tmp_path):
     c = ev.compare("heldout", "old", "new")
     assert c["a"] == 0.625 and c["b"] == 1.0 and c["diff"] == 0.375
     assert c["better"] == ["x1", "x2"] and c["worse"] == [] and c["ci"][0] <= c["diff"] <= c["ci"][1]
+
+
+def test_answer_cache_sees_hit_text(monkeypatch, tmp_path):
+    # the same hit can carry different text (a neighbor chunk glued on or not), so the cache must not reuse its answer
+    import json
+    import ole.evaluate as ev
+    monkeypatch.setattr(ev, "CACHE", tmp_path)
+    monkeypatch.setattr(ev, "grade", lambda row, reply, votes: {"correct": True, "declined": False, "reason": "", "votes": 3})
+    row = {"id": "x", "question": "q?", "expected_answer": "e", "expected_urls": ["u"], "answerable": True}
+    texts, answered = iter(["dinner 4:30-8", "dinner 4:30-8\n\nlunch 10:30-2"]), []
+    monkeypatch.setattr(ev, "retrieve", lambda h, q: [type("H", (), {"id": "1", "url": "u", "text": next(texts)})()])
+    monkeypatch.setattr(ev, "answer_text", lambda h, q, m, hits: answered.append(hits[0].text) or ("a", [], ["1"]))
+    ev.score(row, "m"); ev.score(row, "m")
+    assert len(answered) == 2

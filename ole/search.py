@@ -166,30 +166,53 @@ def search(query: str, k: int = ANSWER_K, raw: str | None = None) -> list[Hit]:
                                 limit=RETRIEVE_K * len(queries), with_payload=True)
     hits = [Hit(id=str(p.id), score=p.score, **{f: p.payload.get(f) for f in
                 ("url", "title", "heading_path", "text", "lastmod")}, index=p.payload.get("index", 0)) for p in res.points]
+    question = "\n".join(reversed(queries))
     if RERANK_K and hits:  # 0 = trust the hybrid (RRF) order
         hits = hits[:RERANK_K]
         kinds = pagetypes.kinds(list({h.url for h in hits}))
-        for h, s in zip(hits, rerank_scores("\n".join(reversed(queries)), [h.embed_text for h in hits], RERANKER)):
+        for h, s in zip(hits, rerank_scores(question, [h.embed_text for h in hits], RERANKER)):
             h.score = s - type_penalty(h, queries, kinds)
         hits.sort(key=lambda h: h.score, reverse=True)
-    return expand(diversify(hits)[:k])
+    return expand(diversify(hits)[:k], question)
 
 
-def merge_neighbors(hits: list[Hit], texts: dict[tuple[str, int], str]) -> list[Hit]:
-    """Glue each hit's previous and next chunk onto it (unless that chunk is a hit itself)."""
+def merge_neighbors(hits: list[Hit], texts: dict[tuple[str, int], str], far: set[tuple[str, int]] = frozenset()) -> list[Hit]:
+    """Glue each hit's previous and next chunk onto it (unless that chunk is a hit itself), and for the hits in `far`
+    (url, index) the chunk after next too."""
     taken = {(h.url, h.index) for h in hits}
     for h in hits:
-        parts = [texts.get((h.url, h.index - 1)) if (h.url, h.index - 1) not in taken else None, h.text,
-                 texts.get((h.url, h.index + 1)) if (h.url, h.index + 1) not in taken else None]
+        after = (1, 2) if (h.url, h.index) in far else (1,)
+        parts = [texts.get((h.url, h.index - 1)) if (h.url, h.index - 1) not in taken else None, h.text]
+        for d in after:
+            if (h.url, h.index + d) in taken or (h.url, h.index + d) not in texts:
+                break
+            parts.append(texts[(h.url, h.index + d)])
         h.text = "\n\n".join(p for p in parts if p)
     return hits
 
 
-def expand(hits: list[Hit]) -> list[Hit]:
-    ids = [chunk_id(h.url, i) for h in hits for i in (h.index - 1, h.index + 1) if i >= 0]
+# A hit's answer can sit two chunks on: a page's "Stav Hall" card is one chunk, its "Dinner 4:30-8 p.m." column the
+# chunk after next, with no "Stav Hall" in it. Gluing that far blindly brought in other buildings' schedules and the
+# answers hedged, so Voyage reads the chunk after next under its hit's headings and it is glued only if relevant.
+NEIGHBOR_MIN = 0.6  # Voyage relevance (0-1) the chunk after next needs (eval 2026-10-29)
+
+
+def expand(hits: list[Hit], question: str | None = None) -> list[Hit]:
+    ids = [chunk_id(h.url, i) for h in hits for i in (h.index - 1, h.index + 1, h.index + 2) if i >= 0]
     found = qdrant().retrieve(COLLECTION, ids, with_payload=True) if ids else []
-    texts = {(p.payload["url"], p.payload.get("index", 0)): p.payload["text"] for p in found}
-    return merge_neighbors(hits, texts)
+    chunks = {(p.payload["url"], p.payload.get("index", 0)): p.payload for p in found}
+    taken = {(h.url, h.index) for h in hits}
+    near = [(h, chunks[(h.url, h.index + 2)]) for h in hits if (h.url, h.index + 2) in chunks
+            and (h.url, h.index + 1) in chunks and not {(h.url, h.index + 1), (h.url, h.index + 2)} & taken]
+    far = set()
+    if question and near and RERANKER == "voyage":  # MiniLM scores aren't on a 0-1 scale
+        docs = [f"{h.title}\n{h.heading_path}\n{c.get('heading_path') or ''}\n\n{c['text']}" for h, c in near]
+        try:
+            far = {(h.url, h.index) for (h, _), s in zip(near, voyage_scores(question, docs)) if s >= NEIGHBOR_MIN}
+        except (httpx.HTTPError, KeyError) as e:  # the next and previous chunks still go in
+            FALLBACKS[0] += 1
+            print(f"[search] voyage neighbor scoring failed ({type(e).__name__})", file=sys.stderr, flush=True)
+    return merge_neighbors(hits, {key: c["text"] for key, c in chunks.items()}, far)
 
 
 def warmup() -> None:

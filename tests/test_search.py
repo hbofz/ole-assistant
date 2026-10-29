@@ -128,8 +128,57 @@ def test_search_uses_raw_question_too(monkeypatch):
             return type("R", (), {"points": [point]})()
     monkeypatch.setattr(s, "qdrant", lambda: Q())
     monkeypatch.setattr(s, "rerank_scores", lambda q, docs, which: seen.setdefault("rerank_q", q) and [1.0] * len(docs))
-    monkeypatch.setattr(s, "expand", lambda hits: hits)
+    monkeypatch.setattr(s, "expand", lambda hits, question: hits)
     s.search("j-term interim requirement", raw="do i need a j term every year")
     assert seen["embedded"] == ["j-term interim requirement", "do i need a j term every year"]
     assert seen["prefetches"] == 4 and seen["limit"] == 2 * s.RETRIEVE_K
     assert seen["rerank_q"] == "do i need a j term every year\nj-term interim requirement"
+
+
+def test_merge_neighbors_adds_chunk_after_next_for_far_hits():
+    from ole.search import merge_neighbors
+    a = Hit(id="a", url="U", title="t", heading_path="", text="hit", lastmod=None, score=1.0, index=5)
+    b = Hit(id="b", url="V", title="t", heading_path="", text="hit", lastmod=None, score=0.9, index=0)
+    texts = {("U", 4): "four", ("U", 6): "six", ("U", 7): "seven", ("V", 1): "one", ("V", 2): "two"}
+    out = merge_neighbors([a, b], texts, far={("U", 5)})
+    assert out[0].text == "four\n\nhit\n\nsix\n\nseven"
+    assert out[1].text == "hit\n\none"  # not in far: next chunk only
+
+
+def test_merge_neighbors_far_stops_at_another_hit():
+    from ole.search import merge_neighbors
+    a = Hit(id="a", url="U", title="t", heading_path="", text="hit", lastmod=None, score=1.0, index=5)
+    b = Hit(id="b", url="U", title="t", heading_path="", text="seven", lastmod=None, score=0.9, index=7)
+    out = merge_neighbors([a, b], {("U", 6): "six", ("U", 8): "eight"}, far={("U", 5)})
+    assert out[0].text == "hit\n\nsix"
+
+
+def _fake_neighbors(monkeypatch, scores):
+    import ole.search as s
+    pts = [type("P", (), {"payload": {"url": "U", "index": i, "heading_path": "Dinner" if i == 7 else "", "text": f"t{i}"}})()
+           for i in (4, 6, 7)]
+    monkeypatch.setattr(s, "qdrant", lambda: type("Q", (), {"retrieve": lambda self, col, ids, **kw: pts})())
+    seen = {}
+
+    def voyage(q, docs):
+        seen["q"], seen["docs"] = q, docs
+        if scores is None:
+            raise s.httpx.ConnectError("down")
+        return [scores] * len(docs)
+    monkeypatch.setattr(s, "voyage_scores", voyage)
+    monkeypatch.setattr(s, "RERANKER", "voyage")
+    return s, seen
+
+
+def test_expand_adds_chunk_after_next_when_relevant(monkeypatch):
+    s, seen = _fake_neighbors(monkeypatch, 0.9)
+    h = Hit(id="a", url="U", title="Ole Dining", heading_path="Stav Hall", text="t5", lastmod=None, score=1.0, index=5)
+    assert s.expand([h], "stav hall hours")[0].text == "t4\n\nt5\n\nt6\n\nt7"
+    assert seen["q"] == "stav hall hours" and seen["docs"] == ["Ole Dining\nStav Hall\nDinner\n\nt7"]  # under the hit's headings
+
+
+def test_expand_skips_chunk_after_next_when_irrelevant_or_voyage_down(monkeypatch):
+    for scores in (0.2, None):
+        s, _ = _fake_neighbors(monkeypatch, scores)
+        h = Hit(id="a", url="U", title="t", heading_path="", text="t5", lastmod=None, score=1.0, index=5)
+        assert s.expand([h], "q")[0].text == "t4\n\nt5\n\nt6"

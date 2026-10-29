@@ -6,11 +6,14 @@ from openai import OpenAI
 from fastembed.rerank.cross_encoder import TextCrossEncoder
 from qdrant_client import QdrantClient, models
 
+from ole import pagetypes
 from ole.chunk import chunk_id
 
 import os
+import re
 import sys
 import time
+from datetime import date
 
 import httpx
 
@@ -112,6 +115,43 @@ def diversify(hits: list[Hit], per_url: int = PER_URL_MAX) -> list[Hit]:
     return out
 
 
+# Everyday questions ("when does stav hall close") should find the regular page, not a reunion schedule, conference
+# housing, break hours or an old copy, which repeat the same words. Pages are labeled offline (ole.pagetypes). Only
+# questions about dates, deadlines, hours, events or schedules are touched: the rewrite adds the current academic year
+# to exactly those, so its "2026-27" is the intent flag. Then an occasion page drops unless the question names its
+# occasion or any occasion, an old page unless it names a year or the past. Ungated, it cost answers on held-out.
+TYPE_PENALTY = 0.2  # on Voyage's 0-1 scale (eval 2026-10-29); ponytail: small next to MiniLM fallback logits
+OCCASION_WORDS = {"summer", "camp", "camps", "conference", "conferences", "reunion", "reunions", "homecoming", "alumni",
+                  "interim", "break", "breaks", "guest", "guests", "archive", "archived", "old", "copy", "past", "thanksgiving",
+                  "holiday", "holidays", "christmas", "winter", "family", "parents", "last", "previous", "j"}
+PAST_WORDS = {"last", "previous", "past", "archive", "archived", "old", "former"}
+GENERIC = {"the", "a", "of", "and", "for", "in", "s", "st", "olaf", "hours", "page", "info", "information", "students",
+           "student", "college", "campus", "new", "week", "weekend", "weekends", "day", "class", "program", "fall", "spring"}
+
+
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z]+", text.lower()))
+
+
+def _stems(text: str) -> set[str]:
+    return {w[:-1] if w.endswith("s") and len(w) > 3 else w for w in _words(text)} - GENERIC
+
+
+def type_penalty(hit: Hit, queries: list[str], kinds: dict[str, tuple[str, str]], today: date | None = None) -> float:
+    """queries: the rewrite, then the student's own words."""
+    kind, about = pagetypes.page_kind(*kinds.get(hit.url, ("regular", "")), today)
+    if pagetypes.year_tag(today) not in queries[0]:
+        return 0.0
+    q = " ".join(queries)
+    if kind == "past":
+        asked = _words(q) & PAST_WORDS or pagetypes.YEAR.search(queries[-1]) or \
+            any(int(y) < pagetypes.academic_year(today) for y in pagetypes.YEAR.findall(q))
+        return 0.0 if asked else TYPE_PENALTY
+    if kind == "occasion":
+        return 0.0 if _stems(q) & _stems(about) or _words(q) & OCCASION_WORDS else TYPE_PENALTY
+    return 0.0
+
+
 def search(query: str, k: int = ANSWER_K, raw: str | None = None) -> list[Hit]:
     """Hybrid search for the rewritten query and, if given, the student's own words (the rewrite
     sometimes drops the words the right page uses). The reranker sees both, natural question first."""
@@ -128,8 +168,9 @@ def search(query: str, k: int = ANSWER_K, raw: str | None = None) -> list[Hit]:
                 ("url", "title", "heading_path", "text", "lastmod")}, index=p.payload.get("index", 0)) for p in res.points]
     if RERANK_K and hits:  # 0 = trust the hybrid (RRF) order
         hits = hits[:RERANK_K]
+        kinds = pagetypes.kinds(list({h.url for h in hits}))
         for h, s in zip(hits, rerank_scores("\n".join(reversed(queries)), [h.embed_text for h in hits], RERANKER)):
-            h.score = s
+            h.score = s - type_penalty(h, queries, kinds)
         hits.sort(key=lambda h: h.score, reverse=True)
     return expand(diversify(hits)[:k])
 

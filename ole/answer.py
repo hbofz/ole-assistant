@@ -7,6 +7,7 @@ from functools import cache
 import anthropic
 
 from ole import conflicts
+from ole.pagetypes import year_tag
 from ole.config import ANSWER_MODEL, BOT_NAME, REWRITE_MODEL
 from ole.search import Hit, search
 
@@ -45,8 +46,7 @@ Reply with only the query."""
 def rewrite_prompt(today: date | None = None) -> str:
     # with the date, "when do juniors register" finds this year's calendar instead of an old one
     d = today or date.today()
-    y = d.year if d.month >= 8 else d.year - 1
-    year = f"{y}-{(y + 1) % 100:02d}"
+    year = year_tag(d)  # search reads this tag back as "a question about dates or hours" (search.type_penalty)
     return (f"{REWRITE_PROMPT}\nToday is {d.isoformat()}, in the {year} academic year. For questions about dates, "
             f"deadlines, hours, events or schedules, add the current academic year ({year}) or term to the query.")
 

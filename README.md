@@ -86,6 +86,16 @@ cp deploy/lefse-conflicts.* ~/.config/systemd/user/ && systemctl --user daemon-r
 systemctl --user enable --now lefse-conflicts.timer
 ```
 
+## Page types
+
+Everyday questions ("when does Stav Hall close?") used to pull reunion schedules, conference housing, break hours and archived copies, which repeat the same words as the regular page. `ole/pagetypes.py` has Claude Haiku (headless, on the subscription) label every live page **regular**, **occasion** (with what the occasion is) or **past**, in a `page_types` table in `pages.db`:
+
+```bash
+uv run python -m ole.pagetypes   # labels pages that are new, changed, or labeled in an earlier academic year (~25 min for all)
+```
+
+At search time an occasion or past page drops 0.2 on the reranker's 0-1 scale, but only for questions about dates, deadlines, hours, events or schedules (the ones the rewrite tags with the current academic year), and not when the question names that occasion, any occasion, a year or "last year". Unlabeled pages count as regular. It runs nightly as the first step of `lefse-conflicts.service`.
+
 ## Test it
 
 ```bash

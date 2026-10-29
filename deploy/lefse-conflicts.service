@@ -1,9 +1,10 @@
 [Unit]
-Description=Lefse conflicts (extract facts from changed pages, judge new conflicts, rewrite the report)
+Description=Lefse nightly labels (page types for new or changed pages, then conflicts: extract facts, judge new conflicts, rewrite the report)
 
 [Service]
 Type=oneshot
 WorkingDirectory=/home/bb/projects/ole-assistant
+ExecStart=/home/bb/.local/bin/uv run python -u -m ole.pagetypes
 ExecStart=/home/bb/.local/bin/uv run python -u -m ole.conflicts extract
 ExecStart=/home/bb/.local/bin/uv run python -u -m ole.conflicts find
 ExecStart=/home/bb/.local/bin/uv run python -u -m ole.conflicts report

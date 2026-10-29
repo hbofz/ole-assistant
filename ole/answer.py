@@ -76,8 +76,10 @@ def rewrite_query(history: list[dict], question: str, client) -> str:
     except anthropic.APIError:
         return question  # search still works with the raw question
     _log_usage(REWRITE_MODEL, getattr(r, "usage", None))
-    text = "".join(b.text for b in r.content if b.type == "text").strip()
-    return text or question
+    text = "".join(b.text for b in r.content if b.type == "text")
+    # the query is the last line: Haiku sometimes reasons or "corrects" itself first ("Wait, I should reply with only...")
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    return lines[-1] if lines else question
 
 
 def retrieve(history: list[dict], question: str) -> list[Hit]:

@@ -188,3 +188,19 @@ def test_rewrite_knows_the_academic_year():
     fake = FakeClient()
     rewrite_query([], "when is the drop deadline", fake)
     assert "academic year" in fake.kw["system"] and "World Languages and Cultures" in fake.kw["system"]
+
+
+def test_rewrite_keeps_only_the_query_when_reasoning_leaks():
+    # Haiku sometimes "corrects" itself in the reply; the query is always the last line (seen on 5 of 312 rewrites)
+    leaks = {
+        "language requirement WLC 2026-27\n\nWait, I should reply with only the query. Corrected:\n\n"
+        "language requirement World Languages and Cultures (WLC)": "language requirement World Languages and Cultures (WLC)",
+        'Today is 2026-10-29, so "this weekend" is October 31.\n\nhalloween events campus October 31 2026':
+            "halloween events campus October 31 2026",
+        "  Piper Center internship grant  \n": "Piper Center internship grant",
+    }
+    for reply, query in leaks.items():
+        fake = FakeClient()
+        fake.messages.create = lambda reply=reply, **kw: type("R", (), {
+            "content": [type("T", (), {"type": "text", "text": reply})()], "usage": None})()
+        assert rewrite_query([], "q", fake) == query

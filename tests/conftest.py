@@ -14,6 +14,13 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(ole.db, "LOCK", tmp_path / "crawl.lock")
 
 
+@pytest.fixture(autouse=True)
+def no_login(monkeypatch):
+    """Tests don't inherit the real .env password; test_auth.py sets its own."""
+    import ole.web
+    monkeypatch.setattr(ole.web, "PASSWORD", None)
+
+
 class FakeSparse:
     def embed(self, texts, batch_size=64):
         for t in texts:

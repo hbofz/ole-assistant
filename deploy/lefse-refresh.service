@@ -1,0 +1,9 @@
+[Unit]
+Description=Lefse nightly refresh (re-check St. Olaf pages, update the index)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bb/projects/ole-assistant
+ExecStart=/home/bb/.local/bin/uv run python -u -m ole.refresh
+StandardOutput=append:/home/bb/projects/ole-assistant/data/refresh.log
+StandardError=append:/home/bb/projects/ole-assistant/data/refresh.log

@@ -1,0 +1,14 @@
+[Unit]
+Description=Lefse chat server (St. Olaf Q&A demo)
+After=network-online.target
+
+[Service]
+WorkingDirectory=/home/bb/projects/ole-assistant
+ExecStart=/home/bb/.local/bin/uv run uvicorn ole.web:app --host 127.0.0.1 --port 8000 --proxy-headers
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/bb/projects/ole-assistant/data/web.log
+StandardError=append:/home/bb/projects/ole-assistant/data/web.log
+
+[Install]
+WantedBy=default.target

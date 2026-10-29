@@ -53,6 +53,17 @@ Suggested schedule (not installed; add it with `crontab -e` if you want it):
 
 `.env` is loaded by `ole.config`, so cron needs no extra environment.
 
+## Keep it running (systemd user services)
+
+`deploy/` holds a service that starts the chat server at boot and restarts it on failure, plus a timer that runs `ole.refresh` every night at 03:07 (logging to `data/refresh.log`):
+
+```bash
+cp deploy/lefse* ~/.config/systemd/user/ && systemctl --user daemon-reload
+systemctl --user enable --now lefse.service lefse-refresh.timer
+```
+
+User services start at boot only with lingering enabled (`loginctl enable-linger $USER`). Undo with `systemctl --user disable --now lefse.service lefse-refresh.timer`.
+
 ## Test it
 
 ```bash

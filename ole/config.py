@@ -21,7 +21,7 @@ SEED_SITEMAPS = ["https://wp.stolaf.edu/sitemap.xml", "https://catalog.stolaf.ed
 SEED_PAGES = ["https://wp.stolaf.edu/", "https://wp.stolaf.edu/pipercenter/", "https://catalog.stolaf.edu/"]
 
 QDRANT_URL = "http://localhost:6333"
-COLLECTION = "stolaf"
+COLLECTION = os.getenv("OLE_COLLECTION", "stolaf")  # build a new index under another name, then switch with no downtime
 DENSE_MODEL = "text-embedding-3-large"  # OpenAI; local CPU models were ~1 s per chunk
 DENSE_DIM = 1024
 SPARSE_MODEL = "Qdrant/bm25"
@@ -34,9 +34,9 @@ GRADER_MODEL = "claude-sonnet-5-5"
 REWRITE_MODEL = "claude-haiku-5-5"
 
 RETRIEVE_K = 40
-RERANK_K = int(os.getenv("OLE_RERANK_K", "20"))  # 0 turns the reranker off
+RERANK_K = int(os.getenv("OLE_RERANK_K", "60"))  # 0 turns the reranker off; 60 beat 20 on hit@8 (eval 2026-10-29)
 ANSWER_K = 8
 PER_URL_MAX = 3
 LEFSE_PASSWORD = os.getenv("LEFSE_PASSWORD") or None  # set it to require a login (public link)
-PROMPT_VERSION = "v5"  # v4: conflict notes, v5: no personal records
+PROMPT_VERSION = "v7"  # v4: conflict notes, v5: no personal records, v6: the current source wins conflicts, v7: same-fact conflicts only, old sole sources still answer
 BOT_NAME = "Lefse"

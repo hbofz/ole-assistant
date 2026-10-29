@@ -7,8 +7,8 @@ A chatbot that answers St. Olaf College students' questions from St. Olaf's publ
 1. **Crawl** (`ole/crawl.py`): reads the sitemaps of wp.stolaf.edu (main site and office sub-sites) and catalog.stolaf.edu, follows in-scope links, obeys robots.txt and backs off when the site rate-limits it. Raw pages are cached in `data/raw/`, with one row per page in `data/pages.db` (SQLite: URL, file, lastmod, when it was fetched and last checked, whether it's live or gone, and a hash of the text Qdrant holds for it). Public Google Docs linked from pages are exported as text. Docs that need a St. Olaf login are listed in `data/google_pending.jsonl`.
 2. **Index** (`ole/index.py`): extracts text by section (course catalog entries become one section per course), splits it into ~300-word chunks, and stores them in Qdrant with an OpenAI `text-embedding-3-large` vector and a BM25 keyword vector. It only embeds pages whose hash is empty (new or re-fetched), and replaces a page's chunks in place, so search stays up. `--full` rebuilds the collection from scratch.
 3. **Refresh** (`ole/refresh.py`): keeps the index current; see below.
-4. **Search** (`ole/search.py`): runs keyword and semantic search together (merged with reciprocal rank fusion), reranks the top 20 with a small local cross-encoder, keeps at most 3 chunks per page, and attaches each hit's neighboring chunks.
-5. **Answer** (`ole/answer.py`): Claude Haiku 5.5 answers only from the retrieved chunks, which are passed as `search_result` blocks so citations point at real sources. Before searching, Claude Haiku 5.5 rewrites every question into a short keyword query, using a small glossary of St. Olaf terms ("gen eds" becomes "OLE Core") and the conversation, so follow-ups like "what about the minor?" work.
+4. **Search** (`ole/search.py`): runs keyword and semantic search together for both the rewritten query and the student's own words (merged with reciprocal rank fusion), reranks the top 60 with Voyage `rerank-3` (a small local cross-encoder if Voyage is unreachable), keeps at most 3 chunks per page, and attaches each hit's neighboring chunks.
+5. **Answer** (`ole/answer.py`): Claude Haiku 5.5 answers only from the retrieved chunks, which are passed as `search_result` blocks so citations point at real sources. Before searching, Claude Haiku 5.5 rewrites every question into a short keyword query, using a small glossary of St. Olaf terms ("gen eds" becomes "OLE Core"), the conversation (so follow-ups like "what about the minor?" work) and today's date (so "when do juniors register?" finds this year's calendar).
 6. **Chat page** (`ole/web.py`, `ole/static/`): streams the answer, shows the sources under it, and says when the knowledge was last refreshed (`GET /api/status`).
 
 ## Run it
@@ -94,9 +94,12 @@ uv run pytest -m integration         # needs Qdrant and a built index
 uv run pytest -m live                # calls Claude (costs a few cents)
 uv run python -m ole.evaluate        # scores Lefse on eval/questions.jsonl (answers on the API, under $1 with Haiku; grading via claude -p)
 uv run python -m ole.evaluate --model claude-haiku-5-5
+uv run python -m ole.evaluate --questions eval/heldout.jsonl   # held-out set: confirm gains here, never tune on it
+uv run python -m ole.evaluate --rep 1          # fresh answers (own cache slot), to see answer noise
+uv run python -m ole.evaluate --retrieval-only # retrieval hit and rank only, ~30 s
 ```
 
-The eval passes when retrieval finds the right page for at least 90% of answerable questions, at least 85% of answers are graded correct, and Lefse gives zero confident answers to questions the site can't answer.
+The eval passes when retrieval finds the right page for at least 90% of answerable questions, at least 85% of answers are graded correct, and Lefse gives zero confident answers to questions the site can't answer. Each answer is graded 3 times by Claude Sonnet and the majority wins (`--votes`); the votes split on under 2% of answers. Most run-to-run noise comes from the answers and the query rewrite instead: the same setup scores 2 to 4 points apart between `--rep`s. So compare changes over several reps, on both sets.
 
 ## Notes for a real deployment?
 

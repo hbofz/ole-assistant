@@ -40,3 +40,12 @@ def test_embed_text_has_context():
 def test_newlines_kept():
     c = chunk_sections(URL, "T", [Section("H", "| a | b |\n| c | d |")], None, "html")[0]
     assert c.text == "| a | b |\n| c | d |"
+
+
+def test_folded_heading_stays_with_its_own_text():
+    # each folded short section's heading goes right above its own text, not above the text carried before it
+    secs = [Section("Stav Hall", "Meal Swipe"), Section("Dinner", "4:30-8 p.m."),
+            Section("Dinner > The Cage", "Flex Dollars"), Section("Other", words(60))]
+    text = chunk_sections(URL, "T", secs, None, "html")[0].text
+    assert text.startswith("Stav Hall\nMeal Swipe")
+    assert text.index("Dinner\n4:30-8") < text.index("The Cage\nFlex Dollars") < text.index("Other\nw0")

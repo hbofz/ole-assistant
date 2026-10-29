@@ -170,3 +170,21 @@ def test_prompt_says_no_personal_records():
     from ole.answer import system_prompt
     p = system_prompt()
     assert "degree audit" in p and "can't see" in p
+
+
+def test_prompt_prefers_the_current_source():
+    from ole.answer import SYSTEM_PROMPT
+    from ole.config import PROMPT_VERSION
+    assert "applies now" in SYSTEM_PROMPT and "Don't take back" in SYSTEM_PROMPT
+    assert "Don't silently pick one" not in SYSTEM_PROMPT and int(PROMPT_VERSION[1:]) >= 6
+
+
+def test_rewrite_knows_the_academic_year():
+    from datetime import date
+    from ole.answer import rewrite_prompt
+    assert "2026-27 academic year" in rewrite_prompt(date(2026, 10, 29))
+    assert "2026-27 academic year" in rewrite_prompt(date(2027, 3, 1))  # spring is still 2026-27
+    assert "2027-28 academic year" in rewrite_prompt(date(2027, 8, 20))
+    fake = FakeClient()
+    rewrite_query([], "when is the drop deadline", fake)
+    assert "academic year" in fake.kw["system"] and "World Languages and Cultures" in fake.kw["system"]

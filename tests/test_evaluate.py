@@ -44,6 +44,56 @@ def test_grade_runs_on_the_subscription(monkeypatch):
         return {"correct": True, "declined": False, "reason": "matches"}
     monkeypatch.setattr(ev, "ask", ask)
     row = {"question": "pay?", "expected_answer": "$14.50/hour", "answerable": True}
-    assert ev.grade(row, "It pays $14.50/hour.") == {"correct": True, "declined": False, "reason": "matches"}
+    assert ev.grade(row, "It pays $14.50/hour.", votes=1) == {"correct": True, "declined": False, "reason": "matches", "votes": 1}
     assert seen["model"] == "claude-sonnet-5-5" and seen["schema"] == ev.GRADE_SCHEMA
     assert seen["system"] == ev.GRADER_PROMPT and "$14.50/hour" in seen["prompt"] and "It pays" in seen["prompt"]
+
+
+def test_cache_key_rep_gives_fresh_answers():
+    assert cache_key("m", "q", [], ["a"]) == cache_key("m", "q", [], ["a"], rep=0)  # old caches still hit
+    assert cache_key("m", "q", [], ["a"], rep=1) != cache_key("m", "q", [], ["a"])
+
+
+def test_run_retrieval_only_skips_answers(monkeypatch, tmp_path):
+    import json
+    import ole.evaluate as ev
+    qs = tmp_path / "q.jsonl"
+    qs.write_text(json.dumps({"id": "x1", "area": "a", "question": "q?", "expected_answer": "e",
+                              "expected_urls": ["https://a/"], "answerable": True}) + "\n" +
+                  json.dumps({"id": "x2", "area": "u", "question": "u?", "expected_answer": "",
+                              "expected_urls": [], "answerable": False}) + "\n")
+    hit = type("H", (), {"id": "1", "url": "https://a"})()
+    monkeypatch.setattr(ev, "retrieve", lambda h, q: [hit])
+    monkeypatch.setattr(ev, "answer_text", lambda *a: (_ for _ in ()).throw(AssertionError("answered")))
+    out = ev.run("m", questions=qs, retrieval_only=True)
+    assert out["summary"]["retrieval_hit"] == 1.0 and out["results"][0]["rank"] == 1
+
+
+def test_grade_takes_majority_of_votes(monkeypatch):
+    import ole.evaluate as ev
+    votes = iter([{"reason": "a", "correct": True, "declined": False},
+                  {"reason": "b", "correct": False, "declined": True},
+                  {"reason": "c", "correct": True, "declined": False}])
+    monkeypatch.setattr(ev, "ask", lambda *a, **k: next(votes))
+    g = ev.grade({"question": "q", "expected_answer": "e", "answerable": True}, "ans", votes=3)
+    assert g["correct"] is True and g["declined"] is False and g["votes"] == 2 and g["reason"] == "a"
+
+
+def test_grader_reasons_before_verdict():
+    import ole.evaluate as ev
+    assert list(ev.GRADE_SCHEMA["properties"])[0] == "reason"
+
+
+def test_compare_pairs_items_across_reps(monkeypatch, tmp_path):
+    import json
+    import ole.evaluate as ev
+    monkeypatch.setattr(ev, "RUNS", tmp_path)
+
+    def run(tag, rep, correct):
+        res = [{"id": f"x{i}", "correct": c} for i, c in enumerate(correct)]
+        (tmp_path / f"t-m-heldout-{tag}-rep{rep}.json").write_text(json.dumps({"summary": {"correct": 0}, "results": res}))
+    run("old", 0, [True, False, False, True]); run("old", 1, [True, False, True, True])
+    run("new", 0, [True, True, True, True])
+    c = ev.compare("heldout", "old", "new")
+    assert c["a"] == 0.625 and c["b"] == 1.0 and c["diff"] == 0.375
+    assert c["better"] == ["x1", "x2"] and c["worse"] == [] and c["ci"][0] <= c["diff"] <= c["ci"][1]

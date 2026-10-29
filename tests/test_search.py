@@ -87,3 +87,49 @@ def test_voyage_failure_falls_back_to_local(monkeypatch):
     monkeypatch.setattr(s, "http", lambda: httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503))))
     monkeypatch.setattr(s, "local_scores", lambda q, docs: [1.0] * len(docs))
     assert s.rerank_scores("q", ["a", "b"], "voyage") == [1.0, 1.0]
+
+
+def test_voyage_retries_rate_limit(monkeypatch):
+    import httpx
+    import ole.search as s
+    codes = iter([429, 429, 200])
+
+    def handler(req):
+        c = next(codes)
+        return httpx.Response(c, json={"data": [{"index": 0, "relevance_score": 0.5}]} if c == 200 else {})
+    monkeypatch.setattr(s, "http", lambda: httpx.Client(transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(s.time, "sleep", lambda t: None)
+    monkeypatch.setenv("VOYAGE_API_KEY", "vk-test")
+    assert s.voyage_scores("q", ["a"]) == [0.5]
+
+
+def test_fallbacks_are_counted(monkeypatch):
+    import httpx
+    import ole.search as s
+    monkeypatch.setattr(s, "http", lambda: httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503))))
+    monkeypatch.setattr(s, "local_scores", lambda q, docs: [1.0] * len(docs))
+    before = s.FALLBACKS[0]
+    s.rerank_scores("q", ["a"], "voyage")
+    assert s.FALLBACKS[0] == before + 1
+
+
+def test_search_uses_raw_question_too(monkeypatch):
+    import numpy as np
+    import ole.search as s
+    seen = {}
+    monkeypatch.setattr(s, "embed_texts", lambda qs: seen.setdefault("embedded", qs) and [[0.0]] * len(qs))
+    sparse = type("Sp", (), {"query_embed": lambda self, q: iter([type("V", (), {"indices": np.array([1]), "values": np.array([1.0])})()])})
+    monkeypatch.setattr(s, "sparse_model", lambda: sparse())
+    point = type("P", (), {"id": "1", "score": 1.0, "payload": {"url": "u", "title": "t", "text": "x", "index": 0}})()
+
+    class Q:
+        def query_points(self, *a, prefetch, limit, **kw):
+            seen["prefetches"], seen["limit"] = len(prefetch), limit
+            return type("R", (), {"points": [point]})()
+    monkeypatch.setattr(s, "qdrant", lambda: Q())
+    monkeypatch.setattr(s, "rerank_scores", lambda q, docs, which: seen.setdefault("rerank_q", q) and [1.0] * len(docs))
+    monkeypatch.setattr(s, "expand", lambda hits: hits)
+    s.search("j-term interim requirement", raw="do i need a j term every year")
+    assert seen["embedded"] == ["j-term interim requirement", "do i need a j term every year"]
+    assert seen["prefetches"] == 4 and seen["limit"] == 2 * s.RETRIEVE_K
+    assert seen["rerank_q"] == "do i need a j term every year\nj-term interim requirement"

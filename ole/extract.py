@@ -31,6 +31,9 @@ def page_title(soup: BeautifulSoup) -> str:
 def extract_html(html: str, url: str) -> tuple[str, list[Section]]:
     soup = BeautifulSoup(html, "html.parser")
     title = page_title(soup)
+    # accordion titles (FAQ questions, "2026-2027 Room Rates") are <button>s, which extraction drops as UI
+    for b in soup.select("button.accordion__header"):
+        b.name, b.attrs = "h4", {}
     sections = []
     if urlsplit(url).netloc == "catalog.stolaf.edu":
         for block in soup.select("div.courseblock"):
@@ -60,7 +63,9 @@ def _markdown_sections(html: str, prefix: list[str] = ()) -> list[Section]:
     def flush():
         text = "\n".join(lines).strip()
         if text:
-            path = [*prefix, *(h for _, h in stack)]
+            for entry in stack:
+                entry[2] = True  # this heading has text under it
+            path = [*prefix, *(h for _, h, _ in stack)]
             path = [p for i, p in enumerate(path) if i == 0 or p != path[i - 1]]
             sections.append(Section(" > ".join(path), clean_block(text)))
         lines.clear()
@@ -70,9 +75,13 @@ def _markdown_sections(html: str, prefix: list[str] = ()) -> list[Section]:
         if m:
             flush()
             level = len(m.group(1))
+            popped = []
             while stack and stack[-1][0] >= level:
-                stack.pop()
-            stack.append((level, clean(m.group(2).replace("*", ""))))
+                popped.append(stack.pop())
+            # a heading with nothing under it is often a styled paragraph (WordPress h4/h5): keep its words, in place
+            lines.extend(head for _, head, used in reversed(popped) if not used)
+            flush()
+            stack.append([level, clean(m.group(2).replace("*", "")), False])
         else:
             lines.append(line)
     flush()

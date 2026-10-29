@@ -30,14 +30,16 @@ def _tokens(text: str) -> list[str]:
 
 def chunk_sections(url: str, title: str, sections: list[Section], lastmod: str | None, kind: str,
                    max_words: int = 300, overlap_words: int = 50) -> list[Chunk]:
-    # fold short sections into the next one so tiny fragments don't become chunks
+    # fold short sections into the next one so tiny fragments don't become chunks; each folded
+    # section's heading goes on the line right above its own text
     merged: list[Section] = []
     carry = ""
     for i, s in enumerate(sections):
-        text = f"{carry}{s.text}" if carry else s.text
+        label = s.heading_path.rsplit(" > ", 1)[-1]
+        own = f"{label}\n{s.text}" if label else s.text
+        text = f"{carry}{own}" if carry else s.text
         if len(text.split()) < MIN_WORDS and i < len(sections) - 1:
-            label = s.heading_path.rsplit(" > ", 1)[-1]
-            carry = f"{label}\n{text}\n\n" if label else f"{text}\n\n"
+            carry = f"{carry}{own}\n\n"
             continue
         carry = ""
         merged.append(Section(s.heading_path, text))

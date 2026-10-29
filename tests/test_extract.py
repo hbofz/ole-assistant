@@ -61,3 +61,22 @@ def test_catalog_tabs_all_extracted():
     assert "Requirements for the Major" in blob
     assert "Plan of Study" in blob
     assert "Ryota Matsuura" in blob
+
+
+def test_accordion_titles_are_kept():
+    # St. Olaf's WordPress accordions put the title (an FAQ question, "2026-2027 Room Rates") in a <button>
+    _, secs = extract_html(read("wp_accordion.html"), "https://wp.stolaf.edu/residencelife/living-on-campus/")
+    rates = {s.heading_path.rsplit(" > ", 1)[-1]: s.text for s in secs}
+    assert "$4,425" in rates["2026-2027 Room Rates"] and "$4,160" in rates["2025-2026 Room Rates"]
+
+
+def test_heading_without_body_is_kept_in_place():
+    # WordPress pages use h4/h5 as styled paragraphs; a heading with nothing under it keeps its words
+    body = ("<h2>Dining</h2><p>" + "food " * 50 + "</p><h4>The Cave</h4><h5>The C-Store returns with new hours.</h5>"
+            "<h4>Vending</h4><h5>A new vending machine in Skoglund has protein meals.</h5>"
+            "<h4>Dietary Restrictions</h4><p>" + "Email the dining manager about restrictions. " * 8 + "</p>")
+    html = f"<html><head><title>T</title></head><body><main>{body}</main></body></html>"
+    _, secs = extract_html(html, "https://wp.stolaf.edu/x/")
+    text = "\n".join(s.text for s in secs)
+    assert text.index("The Cave") < text.index("The C-Store") < text.index("Vending") < text.index("A new vending")
+    assert all("vending" not in s.text for s in secs if s.heading_path.endswith("Dietary Restrictions"))

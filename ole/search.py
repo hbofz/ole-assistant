@@ -10,6 +10,7 @@ from ole.chunk import chunk_id
 
 import os
 import sys
+import time
 
 import httpx
 
@@ -64,10 +65,17 @@ def http() -> httpx.Client:
     return httpx.Client(timeout=15)
 
 
+FALLBACKS = [0]  # times Voyage failed and the local reranker stood in (the eval reports it)
+
+
 def voyage_scores(query: str, docs: list[str]) -> list[float]:
-    r = http().post("https://api.voyageai.com/v1/rerank",
-                    headers={"Authorization": f"Bearer {os.environ['VOYAGE_API_KEY']}"},
-                    json={"query": query, "documents": docs, "model": VOYAGE_RERANK_MODEL, "truncation": True})
+    for wait in (1, 2, 0):  # bursts get 429s; a short wait beats the much weaker local reranker
+        r = http().post("https://api.voyageai.com/v1/rerank",
+                        headers={"Authorization": f"Bearer {os.environ['VOYAGE_API_KEY']}"},
+                        json={"query": query, "documents": docs, "model": VOYAGE_RERANK_MODEL, "truncation": True})
+        if r.status_code != 429 or not wait:
+            break
+        time.sleep(wait)
     r.raise_for_status()
     scores = [0.0] * len(docs)
     for d in r.json()["data"]:
@@ -84,6 +92,7 @@ def rerank_scores(query: str, docs: list[str], which: str) -> list[float]:
         try:
             return voyage_scores(query, docs)
         except (httpx.HTTPError, KeyError) as e:  # Voyage down or no key: the local model still works
+            FALLBACKS[0] += 1
             print(f"[search] voyage rerank failed ({type(e).__name__}), using local reranker", file=sys.stderr, flush=True)
     return local_scores(query, docs)
 
@@ -103,25 +112,23 @@ def diversify(hits: list[Hit], per_url: int = PER_URL_MAX) -> list[Hit]:
     return out
 
 
-def search(query: str, k: int = ANSWER_K) -> list[Hit]:
-    dense = embed_texts([query])[0]
-    sparse = next(iter(sparse_model().query_embed(query)))
-    res = qdrant().query_points(
-        COLLECTION,
-        prefetch=[
-            models.Prefetch(query=dense, using="dense", limit=RETRIEVE_K),
-            models.Prefetch(query=models.SparseVector(indices=sparse.indices.tolist(), values=sparse.values.tolist()),
-                            using="bm25", limit=RETRIEVE_K),
-        ],
-        query=models.FusionQuery(fusion=models.Fusion.RRF),
-        limit=RETRIEVE_K,
-        with_payload=True,
-    )
+def search(query: str, k: int = ANSWER_K, raw: str | None = None) -> list[Hit]:
+    """Hybrid search for the rewritten query and, if given, the student's own words (the rewrite
+    sometimes drops the words the right page uses). The reranker sees both, natural question first."""
+    queries = [query] + ([raw] if raw and raw.strip() != query.strip() else [])
+    prefetch = []
+    for q, dense in zip(queries, embed_texts(queries)):
+        sparse = next(iter(sparse_model().query_embed(q)))
+        prefetch += [models.Prefetch(query=dense, using="dense", limit=RETRIEVE_K),
+                     models.Prefetch(query=models.SparseVector(indices=sparse.indices.tolist(), values=sparse.values.tolist()),
+                                     using="bm25", limit=RETRIEVE_K)]
+    res = qdrant().query_points(COLLECTION, prefetch=prefetch, query=models.FusionQuery(fusion=models.Fusion.RRF),
+                                limit=RETRIEVE_K * len(queries), with_payload=True)
     hits = [Hit(id=str(p.id), score=p.score, **{f: p.payload.get(f) for f in
                 ("url", "title", "heading_path", "text", "lastmod")}, index=p.payload.get("index", 0)) for p in res.points]
     if RERANK_K and hits:  # 0 = trust the hybrid (RRF) order
         hits = hits[:RERANK_K]
-        for h, s in zip(hits, rerank_scores(query, [h.embed_text for h in hits], RERANKER)):
+        for h, s in zip(hits, rerank_scores("\n".join(reversed(queries)), [h.embed_text for h in hits], RERANKER)):
             h.score = s
         hits.sort(key=lambda h: h.score, reverse=True)
     return expand(diversify(hits)[:k])

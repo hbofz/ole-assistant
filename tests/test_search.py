@@ -1,3 +1,4 @@
+import json
 import pytest
 
 from ole.search import Hit, diversify, search
@@ -60,3 +61,29 @@ def test_chunk_index_stored():
     from ole.extract import Section
     cs = chunk_sections("U", "T", [Section("H", "w " * 700)], None, "html")
     assert [c.index for c in cs] == [0, 1, 2]
+
+
+def test_voyage_rerank_scores_in_input_order(monkeypatch):
+    import httpx
+    import ole.search as s
+    seen = {}
+
+    def handler(req):
+        seen["body"] = json.loads(req.content)
+        seen["auth"] = req.headers["authorization"]
+        return httpx.Response(200, json={"data": [{"index": 1, "relevance_score": 0.9},
+                                                  {"index": 0, "relevance_score": 0.2}]})
+
+    monkeypatch.setattr(s, "http", lambda: httpx.Client(transport=httpx.MockTransport(handler)))
+    monkeypatch.setenv("VOYAGE_API_KEY", "vk-test")
+    assert s.voyage_scores("career coach", ["dining hours", "book a coach"]) == [0.2, 0.9]
+    assert seen["body"]["model"] == "rerank-3" and seen["body"]["query"] == "career coach"
+    assert seen["body"]["documents"] == ["dining hours", "book a coach"] and seen["auth"] == "Bearer vk-test"
+
+
+def test_voyage_failure_falls_back_to_local(monkeypatch):
+    import httpx
+    import ole.search as s
+    monkeypatch.setattr(s, "http", lambda: httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503))))
+    monkeypatch.setattr(s, "local_scores", lambda q, docs: [1.0] * len(docs))
+    assert s.rerank_scores("q", ["a", "b"], "voyage") == [1.0, 1.0]

@@ -40,7 +40,7 @@ def delete_points(client: QdrantClient, urls: list[str]) -> None:
     client.delete(COLLECTION, url_filter(urls))
 
 
-def page_chunks(row: dict) -> tuple[list[Chunk], str]:
+def extract_row(row: dict) -> tuple[str, list]:
     path = RAW_DIR / row["file"]
     if row["kind"] == "html":
         title, secs = extract_html(path.read_text(errors="replace"), row["url"])
@@ -48,7 +48,11 @@ def page_chunks(row: dict) -> tuple[list[Chunk], str]:
         title, secs = extract_pdf(path.read_bytes(), row["url"])
     else:
         title, secs = extract_text(path.read_text(errors="replace"), row["title"] or "Document")
-    title = title or row["title"] or row["url"]
+    return title or row["title"] or row["url"], secs
+
+
+def page_chunks(row: dict) -> tuple[list[Chunk], str]:
+    title, secs = extract_row(row)
     # lastmod is in the hash so the date the bot quotes stays current
     h = hashlib.sha256(json.dumps([title, row["lastmod"], secs]).encode()).hexdigest()
     return chunk_sections(row["url"], title, secs, row["lastmod"], row["kind"]), h

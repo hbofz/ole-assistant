@@ -8,7 +8,12 @@ from qdrant_client import QdrantClient, models
 
 from ole.chunk import chunk_id
 
-from ole.config import (ANSWER_K, COLLECTION, DENSE_DIM, DENSE_MODEL, PER_URL_MAX, QDRANT_URL, RERANK_K, RERANK_MODEL,
+import os
+import sys
+
+import httpx
+
+from ole.config import (RERANKER, VOYAGE_RERANK_MODEL, ANSWER_K, COLLECTION, DENSE_DIM, DENSE_MODEL, PER_URL_MAX, QDRANT_URL, RERANK_K, RERANK_MODEL,
                         RETRIEVE_K, SPARSE_MODEL)
 
 EMBED_BATCH = 256
@@ -55,6 +60,35 @@ def reranker() -> TextCrossEncoder:
 
 
 @cache
+def http() -> httpx.Client:
+    return httpx.Client(timeout=15)
+
+
+def voyage_scores(query: str, docs: list[str]) -> list[float]:
+    r = http().post("https://api.voyageai.com/v1/rerank",
+                    headers={"Authorization": f"Bearer {os.environ['VOYAGE_API_KEY']}"},
+                    json={"query": query, "documents": docs, "model": VOYAGE_RERANK_MODEL, "truncation": True})
+    r.raise_for_status()
+    scores = [0.0] * len(docs)
+    for d in r.json()["data"]:
+        scores[d["index"]] = d["relevance_score"]
+    return scores
+
+
+def local_scores(query: str, docs: list[str]) -> list[float]:
+    return [float(s) for s in reranker().rerank(query, docs)]
+
+
+def rerank_scores(query: str, docs: list[str], which: str) -> list[float]:
+    if which == "voyage":
+        try:
+            return voyage_scores(query, docs)
+        except (httpx.HTTPError, KeyError) as e:  # Voyage down or no key: the local model still works
+            print(f"[search] voyage rerank failed ({type(e).__name__}), using local reranker", file=sys.stderr, flush=True)
+    return local_scores(query, docs)
+
+
+@cache
 def qdrant() -> QdrantClient:
     return QdrantClient(QDRANT_URL)
 
@@ -85,10 +119,10 @@ def search(query: str, k: int = ANSWER_K) -> list[Hit]:
     )
     hits = [Hit(id=str(p.id), score=p.score, **{f: p.payload.get(f) for f in
                 ("url", "title", "heading_path", "text", "lastmod")}, index=p.payload.get("index", 0)) for p in res.points]
-    if RERANK_K:  # 0 = trust the hybrid (RRF) order
+    if RERANK_K and hits:  # 0 = trust the hybrid (RRF) order
         hits = hits[:RERANK_K]
-        for h, s in zip(hits, reranker().rerank(query, [h.embed_text for h in hits])):
-            h.score = float(s)
+        for h, s in zip(hits, rerank_scores(query, [h.embed_text for h in hits], RERANKER)):
+            h.score = s
         hits.sort(key=lambda h: h.score, reverse=True)
     return expand(diversify(hits)[:k])
 
@@ -114,4 +148,4 @@ def warmup() -> None:
     """Load the three local models so the first question isn't slow."""
     next(iter(sparse_model().query_embed("warm up")))
     if RERANK_K:
-        list(reranker().rerank("warm up", ["warm up"]))
+        list(reranker().rerank("warm up", ["warm up"]))  # also the fallback when Voyage is unreachable

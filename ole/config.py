@@ -25,6 +25,8 @@ COLLECTION = "stolaf"
 DENSE_MODEL = "text-embedding-3-large"  # OpenAI; local CPU models were ~1 s per chunk
 DENSE_DIM = 1024
 SPARSE_MODEL = "Qdrant/bm25"
+RERANKER = os.getenv("OLE_RERANKER", "voyage")  # "voyage" (rerank-3, hosted) or "local" (MiniLM on CPU)
+VOYAGE_RERANK_MODEL = "rerank-3"
 RERANK_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"  # bge-reranker-base took ~28 s per question on CPU
 
 ANSWER_MODEL = os.getenv("OLE_MODEL", "claude-haiku-5-5")  # Hamzah: same eval scores as Sonnet, ~20x cheaper
@@ -36,5 +38,5 @@ RERANK_K = int(os.getenv("OLE_RERANK_K", "20"))  # 0 turns the reranker off
 ANSWER_K = 8
 PER_URL_MAX = 3
 LEFSE_PASSWORD = os.getenv("LEFSE_PASSWORD") or None  # set it to require a login (public link)
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v5"  # v4: conflict notes, v5: no personal records
 BOT_NAME = "Lefse"

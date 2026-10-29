@@ -53,3 +53,19 @@ def test_status_reports_last_check_of_live_pages():
         put(con, {"url": "https://wp.stolaf.edu/c/", "checked_at": "2026-10-28T03:00:00+00:00", "status": "gone"})
     r = TestClient(web.app).get("/api/status")
     assert r.json() == {"updated": "2026-10-27T03:00:00+00:00", "pages": 2}
+
+
+def test_conflicts_report_is_served(monkeypatch, tmp_path):
+    monkeypatch.setattr(web, "CONFLICTS_HTML", tmp_path / "conflicts.html")
+    assert TestClient(web.app).get("/conflicts").status_code == 404
+    (tmp_path / "conflicts.html").write_text("<title>Lefse conflicts</title>")
+    r = TestClient(web.app).get("/conflicts")
+    assert r.status_code == 200 and "Lefse conflicts" in r.text and r.headers["content-type"].startswith("text/html")
+
+
+def test_conflicts_report_needs_login(monkeypatch, tmp_path):
+    monkeypatch.setattr(web, "PASSWORD", "pw")
+    monkeypatch.setattr(web, "CONFLICTS_HTML", tmp_path / "conflicts.html")
+    (tmp_path / "conflicts.html").write_text("secret")
+    r = TestClient(web.app, follow_redirects=False).get("/conflicts")
+    assert r.status_code == 303 and r.headers["location"] == "/login"

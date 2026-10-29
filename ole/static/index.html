@@ -182,7 +182,7 @@ textarea::placeholder { color: var(--ink-soft); }
 
 <header class="top">
   <svg aria-hidden="true"><use href="#lefse"/></svg>
-  <div class="brand">Lefse<small>St. Olaf helper (demo)</small></div>
+  <div class="brand">Lefse<small>St. Olaf helper (test version)</small></div>
   <button class="new-chat" id="newChat" hidden>New chat</button>
 </header>
 
@@ -191,12 +191,12 @@ textarea::placeholder { color: var(--ink-soft); }
     <section class="hello" id="hello">
       <svg class="big blink" viewBox="0 0 120 120" role="img" aria-label="Lefse, a smiling round flatbread"><use href="#lefse"/></svg>
       <h1>Hei! I'm Lefse.</h1>
-      <p>Ask me anything about St. Olaf: classes, majors, registering, the Piper Center, internships, campus life. Every answer links to the page it came from.</p>
+      <p>Ask me about St. Olaf: classes and requirements, registration, financial aid, housing, campus offices and more. I look things up on St. Olaf's public website and link you to every page I used.</p>
       <div class="starters" id="starters">
-        <button>What do I need for a computer science major?</button>
-        <button>How do I get academic credit for an internship?</button>
-        <button>How do I book a meeting with a career coach?</button>
-        <button>Is there funding for unpaid summer internships?</button>
+        <button>What do I need to finish the OLE Core?</button>
+        <button>When is the FAFSA due?</button>
+        <button>How do I add or drop a class?</button>
+        <button>Where do first-years live?</button>
       </div>
     </section>
   </div>
@@ -204,12 +204,12 @@ textarea::placeholder { color: var(--ink-soft); }
 
 <div class="composer-wrap">
   <form id="form">
-    <textarea id="q" rows="1" maxlength="2000" placeholder="Ask Lefse about St. Olaf" aria-label="Your question"></textarea>
+    <textarea id="q" rows="1" maxlength="2000" placeholder="Ask a question about St. Olaf" aria-label="Your question"></textarea>
     <button class="send" id="send" aria-label="Send" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
     </button>
   </form>
-  <p class="fine-print">A Piper Center research demo. Lefse answers from St. Olaf's public web pages, so double-check anything important with the office it links to.<span id="updated"></span></p>
+  <p class="fine-print">Lefse only reads St. Olaf's public website, like what a course counts toward, aid deadlines or office hours. It can't see anything behind a login, such as your schedule, grades, degree audit or aid package. Answers can be out of date, so check the linked page before you rely on one.<span id="updated"></span></p>
 </div>
 
 <script src="/static/render.js"></script>
@@ -231,7 +231,7 @@ function addMessage(who) {
 }
 
 fetch("/api/status").then((r) => r.json()).then(({updated}) => {
-  if (updated) $("updated").textContent = ` Knowledge updated ${new Date(updated).toLocaleDateString(undefined, {month: "long", day: "numeric", year: "numeric"})}.`;
+  if (updated) $("updated").textContent = ` Pages last checked ${new Date(updated).toLocaleDateString(undefined, {month: "long", day: "numeric", year: "numeric"})}.`;
 }).catch(() => {});
 
 function scrollDown() { scroller.scrollTop = scroller.scrollHeight; }
@@ -252,7 +252,7 @@ async function ask(question) {
   const {el, bubble} = addMessage("bot");
   const avatar = el.querySelector(".avatar");
   avatar.classList.add("flip");
-  bubble.innerHTML = `<div class="thinking">Flipping through St. Olaf pages</div>`;
+  bubble.innerHTML = `<div class="thinking">Looking through St. Olaf&#39;s website</div>`;
   scrollDown();
   setBusy(true);
 

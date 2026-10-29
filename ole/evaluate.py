@@ -11,6 +11,7 @@ from collections import defaultdict
 
 from ole import answer
 from ole.answer import answer_text, retrieve
+from ole.claude_cli import ask
 from ole.config import ANSWER_MODEL, DATA_DIR, GRADER_MODEL, PROMPT_VERSION, ROOT
 
 QUESTIONS = ROOT / "eval" / "questions.jsonl"
@@ -46,13 +47,9 @@ def _same_page(a: str, b: str) -> bool:
 def grade(row: dict, reply: str) -> dict:
     expected = row["expected_answer"] if row["answerable"] else \
         "UNANSWERABLE. St. Olaf's public pages don't cover this (or it isn't about St. Olaf). The right behavior is to say so and decline."
-    r = answer.client().messages.create(
-        model=GRADER_MODEL, max_tokens=2000, system=GRADER_PROMPT,
-        output_config={"effort": "low", "format": {"type": "json_schema", "schema": GRADE_SCHEMA}},
-        messages=[{"role": "user", "content": f"Question: {row['question']}\n\nExpected: {expected}\n\nBot answer:\n{reply}"}],
-    )
-    answer._log_usage(GRADER_MODEL, r.usage)
-    return json.loads("".join(b.text for b in r.content if b.type == "text"))
+    # graded on the subscription (headless Claude Code); answers stay on the API, the path being measured
+    return ask(f"Question: {row['question']}\n\nExpected: {expected}\n\nBot answer:\n{reply}", GRADER_PROMPT,
+               GRADE_SCHEMA, model=GRADER_MODEL)
 
 
 def summarize(results: list[dict]) -> dict:

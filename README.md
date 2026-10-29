@@ -64,13 +64,35 @@ systemctl --user enable --now lefse.service lefse-refresh.timer
 
 User services start at boot only with lingering enabled (`loginctl enable-linger $USER`). Undo with `systemctl --user disable --now lefse.service lefse-refresh.timer`.
 
+## Conflicts
+
+St. Olaf's own pages sometimes disagree (CURI pay of $13.50/hour on one page, $14.50/hour on another). `ole/conflicts.py` finds these, judges which page is current, and Lefse uses the verdicts when it answers:
+
+```bash
+uv run python -m ole.conflicts extract   # Claude Haiku lists each page's checkable facts (new or changed pages only)
+uv run python -m ole.conflicts find      # groups facts by topic, Claude Sonnet judges new groups
+uv run python -m ole.conflicts report    # writes data/conflicts.html
+```
+
+- **extract** skips pages with fewer than two fact-looking tokens (money, decimals, times, credit and hour counts), archive and dated URLs, and profile pages. It remembers a hash of each page's text, so re-runs only read pages that changed.
+- **find** embeds each fact's key, groups near-identical keys whose values differ, and asks Sonnet whether they really conflict. Signals: a stated year or term, then the last-modified date (ignoring bulk-migration dates), then whether a page is a copy of another office's page. Verdicts are resolved (one page is current), unresolved, or not a conflict. Only groups it hasn't judged are sent.
+- **At answer time**, a retrieved page on the outdated side gets tagged, and the newer page's quote is added as a citable source. For an unresolved conflict, Lefse is told to give both figures and name the office to ask.
+- **The report** is at `/conflicts` on the chat server (behind the same login): conflicts by office, with both quotes, links, the verdict and the reason.
+
+Claude runs here as headless Claude Code (`claude -p`, `ole/claude_cli.py`) on the owner's subscription, not on the API key; the eval's grader uses the same path. The chat's own answers stay on the API. A first full run takes a few hours; nightly runs only touch changed pages. Optional nightly timer (05:37, after the refresh, logging to `data/conflicts.log`):
+
+```bash
+cp deploy/lefse-conflicts.* ~/.config/systemd/user/ && systemctl --user daemon-reload
+systemctl --user enable --now lefse-conflicts.timer
+```
+
 ## Test it
 
 ```bash
 uv run pytest                        # fast tests, no API calls
 uv run pytest -m integration         # needs Qdrant and a built index
 uv run pytest -m live                # calls Claude (costs a few cents)
-uv run python -m ole.evaluate        # scores Lefse on eval/questions.jsonl (about $2 to $4 per run)
+uv run python -m ole.evaluate        # scores Lefse on eval/questions.jsonl (answers on the API, under $1 with Haiku; grading via claude -p)
 uv run python -m ole.evaluate --model claude-haiku-5-5
 ```
 

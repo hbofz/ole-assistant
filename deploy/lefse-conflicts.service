@@ -1,0 +1,11 @@
+[Unit]
+Description=Lefse conflicts (extract facts from changed pages, judge new conflicts, rewrite the report)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bb/projects/ole-assistant
+ExecStart=/home/bb/.local/bin/uv run python -u -m ole.conflicts extract
+ExecStart=/home/bb/.local/bin/uv run python -u -m ole.conflicts find
+ExecStart=/home/bb/.local/bin/uv run python -u -m ole.conflicts report
+StandardOutput=append:/home/bb/projects/ole-assistant/data/conflicts.log
+StandardError=append:/home/bb/projects/ole-assistant/data/conflicts.log

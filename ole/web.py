@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ole.answer import stream_answer
-from ole.config import LEFSE_PASSWORD
+from ole.config import DATA_DIR, LEFSE_PASSWORD
 from ole.db import connect
 from ole.search import warmup
 
@@ -25,6 +25,7 @@ MAX_QUESTION = 2000
 PASSWORD = LEFSE_PASSWORD  # None = no login (local use)
 FAIL_DELAY = 1.0  # seconds per wrong password, so guessing is slow
 COOKIE = "lefse_session"
+CONFLICTS_HTML = DATA_DIR / "conflicts.html"  # written by python -m ole.conflicts report
 
 
 
@@ -90,6 +91,13 @@ class ChatRequest(BaseModel):
 @app.get("/")
 def index():
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/conflicts")
+def conflicts_report():
+    if not CONFLICTS_HTML.exists():
+        raise HTTPException(404, "No conflicts report yet. Run: uv run python -m ole.conflicts report")
+    return FileResponse(CONFLICTS_HTML)
 
 
 @app.get("/api/status")

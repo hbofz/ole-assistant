@@ -33,3 +33,17 @@ def test_cache_key_changes():
     assert base == cache_key("m", "q", [], ["a", "b"])
     assert base != cache_key("m2", "q", [], ["a", "b"])
     assert base != cache_key("m", "q", [], ["a", "c"])
+
+
+def test_grade_runs_on_the_subscription(monkeypatch):
+    import ole.evaluate as ev
+    seen = {}
+
+    def ask(prompt, system, schema, model, effort="low"):
+        seen.update(prompt=prompt, system=system, schema=schema, model=model)
+        return {"correct": True, "declined": False, "reason": "matches"}
+    monkeypatch.setattr(ev, "ask", ask)
+    row = {"question": "pay?", "expected_answer": "$14.50/hour", "answerable": True}
+    assert ev.grade(row, "It pays $14.50/hour.") == {"correct": True, "declined": False, "reason": "matches"}
+    assert seen["model"] == "claude-sonnet-5-5" and seen["schema"] == ev.GRADE_SCHEMA
+    assert seen["system"] == ev.GRADER_PROMPT and "$14.50/hour" in seen["prompt"] and "It pays" in seen["prompt"]

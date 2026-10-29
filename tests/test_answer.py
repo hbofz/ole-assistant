@@ -141,3 +141,32 @@ def test_system_prompt_has_today_and_untrusted_results():
 
 def test_unknown_date_is_marked():
     assert build_messages([], "q", [hit(lastmod=None)])[-1]["content"][0]["title"] == "Page | Sec (date unknown)"
+
+
+def test_build_messages_points_outdated_hits_at_the_newer_page(monkeypatch):
+    import ole.conflicts as cf
+    stale = "https://wp.stolaf.edu/curi/student-applications-2/"
+    newer = {"type": "search_result", "source": "https://wp.stolaf.edu/curi/research-programs/", "title": "Research",
+             "content": [{"type": "text", "text": "$14.50/hour. This page is newer; Info shows an outdated figure."}],
+             "citations": {"enabled": True}}
+    seen = []
+
+    def notes(hits):
+        seen.append(hits)
+        return {stale: " (outdated on CURI pay; see newer page)"}, [newer]
+    monkeypatch.setattr(cf, "notes", notes)
+    content = build_messages([], "pay?", [hit(url=stale, lastmod="2026-02-26T00:00:00Z")])[-1]["content"]
+    assert seen == [[(stale, "Some text.")]]
+    assert content[0]["title"] == "Page | Sec (updated 2026-02-26) (outdated on CURI pay; see newer page)"
+    assert content[1] == newer and content[-1] == {"type": "text", "text": "pay?"}
+
+
+def test_prompt_version_bumped_for_conflict_notes():
+    from ole.config import PROMPT_VERSION
+    assert int(PROMPT_VERSION[1:]) >= 4  # bumped for conflict notes (cached eval answers must not be reused)
+
+
+def test_prompt_says_no_personal_records():
+    from ole.answer import system_prompt
+    p = system_prompt()
+    assert "degree audit" in p and "can't see" in p

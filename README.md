@@ -28,7 +28,7 @@ uv run python -m ole.index           # embeds pages not yet indexed; --full rebu
 uv run uvicorn ole.web:app --port 8000
 ```
 
-Then open http://localhost:8000. Add `--host <address>` to reach it from another device (for example a Tailscale IP).
+Then open http://localhost:8000. To share it, set `LEFSE_PASSWORD=...` in `.env` (visitors then get a login page) and expose the port over HTTPS, for example `tailscale funnel --bg --https=8443 http://127.0.0.1:8000` (turn off with `tailscale funnel --https=8443 off`). Add `--host <address>` to reach it from another device (for example a Tailscale IP).
 
 To add a document by hand (for example a login-only Google Doc read through the Drive MCP): `uv run python -m ole.add_doc --url URL --title TITLE --file text.txt`, then re-run the index.
 

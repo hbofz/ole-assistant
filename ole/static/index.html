@@ -272,6 +272,7 @@ async function ask(question) {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({question, history}),
     });
+    if (res.status === 401) { location.href = "/login"; return; }  // session ended
     if (!res.ok) {
       const detail = (await res.json().catch(() => ({}))).detail;
       throw new Error(typeof detail === "string" ? detail : `The server answered with error ${res.status}.`);

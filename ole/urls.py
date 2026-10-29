@@ -15,7 +15,7 @@ NOISE = re.compile(
 def normalize(url: str) -> str:
     s = urlsplit(urldefrag(url)[0])
     scheme = "https" if s.scheme in ("http", "https") else s.scheme
-    host, path = s.netloc.lower(), s.path or "/"
+    host, path = s.netloc.lower(), re.sub(r"/{2,}", "/", s.path) or "/"  # "//apps/x" would dodge robots rules
     if host == "wp.stolaf.edu" and not path.endswith("/") and "." not in path.rsplit("/", 1)[-1]:
         path += "/"  # WordPress serves /classics and /classics/ as the same page
     return urlunsplit((scheme, host, path, s.query, ""))

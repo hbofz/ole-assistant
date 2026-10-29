@@ -36,6 +36,11 @@ def _append(path, row: dict) -> None:
         f.write(json.dumps(row) + "\n")
 
 
+def _subsite(url: str) -> str:
+    s = urlsplit(url)
+    return f"{s.netloc}/{s.path.strip('/').split('/')[0]}"
+
+
 class Crawler:
     def __init__(self, client: httpx.Client, max_pages: int):
         self.client = client
@@ -60,6 +65,7 @@ class Crawler:
         self.last_request = 0.0
         self.delay = CRAWL_DELAY
         self.errors = 0
+        self.walled: set[str] = set()  # wp.stolaf.edu sub-sites that redirect to their login page
 
     def get(self, url: str) -> httpx.Response:
         wait = self.last_request + self.delay - time.monotonic()
@@ -157,6 +163,10 @@ class Crawler:
     def do_page(self, url: str) -> None:
         if url in self.done or not self.robots.allowed(url):
             return
+        if _subsite(url) in self.walled:  # same login wall as an earlier page: record without asking
+            mark_gone(url, self.lastmod.get(url))
+            self.done.add(url)
+            return
         r = self.get(url)
         _check_limit(r)
         final = normalize(str(r.url))
@@ -166,9 +176,15 @@ class Crawler:
             return
         if r.status_code != 200:
             raise RuntimeError(f"HTTP {r.status_code}")
-        if final != url and (final in self.done or urlsplit(final).netloc not in ALLOWED_HOSTS or is_noise(final)
-                             or not self.robots.allowed(final)):
-            return
+        if final != url:
+            if urlsplit(final).path.endswith("/wp-login.php") and _subsite(final) == _subsite(url):
+                self.walled.add(_subsite(url))
+            # record the redirect source so no later run fetches it again (login walls, moved pages)
+            mark_gone(url, self.lastmod.get(url))
+            self.done.add(url)
+            if final in self.done or urlsplit(final).netloc not in ALLOWED_HOSTS or is_noise(final) \
+                    or not self.robots.allowed(final):
+                return
         self.lastmod.setdefault(final, self.lastmod.get(url))
         ctype = r.headers.get("content-type", "")
         if ctype.startswith("text/html"):

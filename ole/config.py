@@ -35,5 +35,6 @@ RETRIEVE_K = 40
 RERANK_K = int(os.getenv("OLE_RERANK_K", "20"))  # 0 turns the reranker off
 ANSWER_K = 8
 PER_URL_MAX = 3
+LEFSE_PASSWORD = os.getenv("LEFSE_PASSWORD") or None  # set it to require a login (public link)
 PROMPT_VERSION = "v3"
 BOT_NAME = "Lefse"

@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 .superpowers/
 docs/superpowers/
+.claude/

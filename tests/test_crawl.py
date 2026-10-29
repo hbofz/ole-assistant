@@ -156,3 +156,50 @@ def test_shallow_pages_first(tmp_path, monkeypatch):
         c.enqueue(u)
     assert [c.next_page() for _ in range(3)] == ["https://wp.stolaf.edu/x/", "https://wp.stolaf.edu/a/b/",
                                                   "https://wp.stolaf.edu/a/b/c/d/"]
+
+
+def test_redirect_to_login_recorded_and_not_refetched(tmp_path, monkeypatch):
+    reqs = []
+
+    def make_client():
+        inner = setup(tmp_path, monkeypatch, reqs)._transport.handler
+
+        def handler(req):
+            url = str(req.url)
+            if url == "https://wp.stolaf.edu/c/":
+                reqs.append(url)
+                return httpx.Response(302, headers={"location": "https://wp.stolaf.edu/wp-login.php?redirect_to=x"})
+            if "wp-login.php" in url:
+                return httpx.Response(200, text="<html>login</html>", headers={"content-type": "text/html"})
+            return inner(req)
+        return httpx.Client(transport=httpx.MockTransport(handler))
+
+    crawl_mod.crawl(make_client())
+    assert "https://wp.stolaf.edu/c/" in {r["url"] for r in manifest(tmp_path, status="gone")}
+    before = reqs.count("https://wp.stolaf.edu/c/")
+    crawl_mod.crawl(make_client())
+    assert reqs.count("https://wp.stolaf.edu/c/") == before  # second run doesn't ask again
+
+
+def test_login_walled_subsite_skipped_after_first_redirect(tmp_path, monkeypatch):
+    reqs = []
+    inner = setup(tmp_path, monkeypatch, reqs)._transport.handler
+    sitemap = """<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://wp.stolaf.edu/vids/one/</loc></url><url><loc>https://wp.stolaf.edu/vids/two/</loc></url>
+<url><loc>https://wp.stolaf.edu/vids/three/</loc></url></urlset>"""
+
+    def handler(req):
+        url = str(req.url)
+        if url == "https://wp.stolaf.edu/sitemap.xml":
+            return httpx.Response(200, text=sitemap)
+        if url.startswith("https://wp.stolaf.edu/vids/") and "wp-login" not in url and "sitemap" not in url:
+            reqs.append(url)
+            return httpx.Response(302, headers={"location": "https://wp.stolaf.edu/vids/wp-login.php?redirect_to=x"})
+        if "wp-login.php" in url:
+            return httpx.Response(200, text="<html>login</html>", headers={"content-type": "text/html"})
+        return inner(req)
+
+    crawl_mod.crawl(httpx.Client(transport=httpx.MockTransport(handler)))
+    assert [u for u in reqs if "/vids/" in u and "sitemap" not in u] == ["https://wp.stolaf.edu/vids/one/"]  # the other two are known to be behind the same login
+    assert {"https://wp.stolaf.edu/vids/two/", "https://wp.stolaf.edu/vids/three/"} <= \
+        {r["url"] for r in manifest(tmp_path, status="gone")}

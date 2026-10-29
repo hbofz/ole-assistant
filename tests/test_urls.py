@@ -76,3 +76,10 @@ def test_robots_rate_limited_raises_and_retries_later():
     assert e.value.retry_after == 60
     state["limited"] = False
     assert r.allowed("https://wp.stolaf.edu/a/") and not r.allowed("https://wp.stolaf.edu/private/x")
+
+
+def test_double_slashes_collapse_so_robots_rules_apply():
+    assert normalize("https://www.stolaf.edu//apps/olecard/checkbalance/index.cfm") == \
+        "https://www.stolaf.edu/apps/olecard/checkbalance/index.cfm"
+    r, _ = _robots()
+    assert not r.allowed(normalize("https://wp.stolaf.edu//catalog/x/"))

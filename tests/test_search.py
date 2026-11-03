@@ -63,44 +63,58 @@ def test_chunk_index_stored():
     assert [c.index for c in cs] == [0, 1, 2]
 
 
-def test_voyage_rerank_scores_in_input_order(monkeypatch):
+def test_cloud_rerank_scores_in_input_order(monkeypatch):
     import httpx
     import ole.search as s
     seen = {}
 
     def handler(req):
-        seen["body"] = json.loads(req.content)
-        seen["auth"] = req.headers["authorization"]
-        return httpx.Response(200, json={"data": [{"index": 1, "relevance_score": 0.9},
-                                                  {"index": 0, "relevance_score": 0.2}]})
+        seen["body"], seen["auth"], seen["url"] = json.loads(req.content), req.headers["authorization"], str(req.url)
+        return httpx.Response(200, json={"success": True, "result": {"response": [{"id": 1, "score": 0.9}, {"id": 0, "score": 0.2}]}})
 
     monkeypatch.setattr(s, "http", lambda: httpx.Client(transport=httpx.MockTransport(handler)))
-    monkeypatch.setenv("VOYAGE_API_KEY", "vk-test")
-    assert s.voyage_scores("career coach", ["dining hours", "book a coach"]) == [0.2, 0.9]
-    assert seen["body"]["model"] == "rerank-3" and seen["body"]["query"] == "career coach"
-    assert seen["body"]["documents"] == ["dining hours", "book a coach"] and seen["auth"] == "Bearer vk-test"
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "cf-test")
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+    assert s.cloud_scores("career coach", ["dining hours", "book a coach"]) == [0.2, 0.9]
+    assert seen["url"] == "https://api.cloudflare.com/client/v4/accounts/acct/ai/run/@cf/baai/bge-reranker-base"
+    assert seen["body"] == {"query": "career coach", "contexts": [{"text": "dining hours"}, {"text": "book a coach"}], "top_k": 2}
+    assert seen["auth"] == "Bearer cf-test"
 
 
-def test_voyage_failure_falls_back_to_local(monkeypatch):
+def test_cloud_failure_falls_back_to_local(monkeypatch):
     import httpx
     import ole.search as s
     monkeypatch.setattr(s, "http", lambda: httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503))))
     monkeypatch.setattr(s, "local_scores", lambda q, docs: [1.0] * len(docs))
-    assert s.rerank_scores("q", ["a", "b"], "voyage") == [1.0, 1.0]
+    assert s.rerank_scores("q", ["a", "b"], "cloud") == [1.0, 1.0]
 
 
-def test_voyage_retries_rate_limit(monkeypatch):
+def test_cloud_retries_rate_limit(monkeypatch):
     import httpx
     import ole.search as s
     codes = iter([429, 429, 200])
 
     def handler(req):
         c = next(codes)
-        return httpx.Response(c, json={"data": [{"index": 0, "relevance_score": 0.5}]} if c == 200 else {})
+        return httpx.Response(c, json={"result": {"response": [{"id": 0, "score": 0.5}]}} if c == 200 else {})
     monkeypatch.setattr(s, "http", lambda: httpx.Client(transport=httpx.MockTransport(handler)))
     monkeypatch.setattr(s.time, "sleep", lambda t: None)
-    monkeypatch.setenv("VOYAGE_API_KEY", "vk-test")
-    assert s.voyage_scores("q", ["a"]) == [0.5]
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "cf-test")
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+    assert s.cloud_scores("q", ["a"]) == [0.5]
+
+
+def test_cloud_bad_body_falls_back_to_local(monkeypatch):
+    import httpx
+    import ole.search as s
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "cf-test")
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+    monkeypatch.setattr(s, "local_scores", lambda q, docs: [1.0] * len(docs))
+    for body in ({"success": False, "result": None}, {"result": {"response": [{"id": 5, "score": 0.5}]}}):
+        monkeypatch.setattr(s, "http", lambda: httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body))))
+        assert s.rerank_scores("q", ["a"], "cloud") == [1.0]
+    monkeypatch.setattr(s, "http", lambda: httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="oops"))))
+    assert s.rerank_scores("q", ["a"], "cloud") == [1.0]
 
 
 def test_fallbacks_are_counted(monkeypatch):
@@ -109,7 +123,7 @@ def test_fallbacks_are_counted(monkeypatch):
     monkeypatch.setattr(s, "http", lambda: httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503))))
     monkeypatch.setattr(s, "local_scores", lambda q, docs: [1.0] * len(docs))
     before = s.FALLBACKS[0]
-    s.rerank_scores("q", ["a"], "voyage")
+    s.rerank_scores("q", ["a"], "cloud")
     assert s.FALLBACKS[0] == before + 1
 
 
@@ -133,6 +147,22 @@ def test_search_uses_raw_question_too(monkeypatch):
     assert seen["embedded"] == ["j-term interim requirement", "do i need a j term every year"]
     assert seen["prefetches"] == 4 and seen["limit"] == 2 * s.RETRIEVE_K
     assert seen["rerank_q"] == "do i need a j term every year\nj-term interim requirement"
+
+
+def test_search_fuses_rerank_and_hybrid_ranks(monkeypatch):
+    import numpy as np
+    import ole.search as s
+    monkeypatch.setattr(s, "embed_texts", lambda qs: [[0.0]] * len(qs))
+    sparse = type("Sp", (), {"query_embed": lambda self, q: iter([type("V", (), {"indices": np.array([1]), "values": np.array([1.0])})()])})
+    monkeypatch.setattr(s, "sparse_model", lambda: sparse())
+    points = [type("P", (), {"id": str(i), "score": 1.0, "payload": {"url": f"u{i}", "title": "t", "text": "x", "index": 0}})()
+              for i in range(4)]
+    monkeypatch.setattr(s, "qdrant", lambda: type("Q", (), {"query_points": lambda self, *a, **kw: type("R", (), {"points": points})()})())
+    monkeypatch.setattr(s.pagetypes, "kinds", lambda urls: {})
+    monkeypatch.setattr(s, "rerank_scores", lambda q, docs, which: [0.1, 0.2, 0.9, 0.3])
+    monkeypatch.setattr(s, "expand", lambda hits, question: hits)
+    # rerank alone would give u2 u3 u1 u0; fused with the hybrid order u0 u1 u2 u3 it is u2 u0 u1 u3
+    assert [h.url for h in s.search("q")] == ["u2", "u0", "u1", "u3"]
 
 
 def test_merge_neighbors_adds_chunk_after_next_for_far_hits():
@@ -160,13 +190,13 @@ def _fake_neighbors(monkeypatch, scores):
     monkeypatch.setattr(s, "qdrant", lambda: type("Q", (), {"retrieve": lambda self, col, ids, **kw: pts})())
     seen = {}
 
-    def voyage(q, docs):
+    def cloud(q, docs):
         seen["q"], seen["docs"] = q, docs
         if scores is None:
             raise s.httpx.ConnectError("down")
         return [scores] * len(docs)
-    monkeypatch.setattr(s, "voyage_scores", voyage)
-    monkeypatch.setattr(s, "RERANKER", "voyage")
+    monkeypatch.setattr(s, "cloud_scores", cloud)
+    monkeypatch.setattr(s, "RERANKER", "cloud")
     return s, seen
 
 
@@ -177,7 +207,7 @@ def test_expand_adds_chunk_after_next_when_relevant(monkeypatch):
     assert seen["q"] == "stav hall hours" and seen["docs"] == ["Ole Dining\nStav Hall\nDinner\n\nt7"]  # under the hit's headings
 
 
-def test_expand_skips_chunk_after_next_when_irrelevant_or_voyage_down(monkeypatch):
+def test_expand_skips_chunk_after_next_when_irrelevant_or_reranker_down(monkeypatch):
     for scores in (0.2, None):
         s, _ = _fake_neighbors(monkeypatch, scores)
         h = Hit(id="a", url="U", title="t", heading_path="", text="t5", lastmod=None, score=1.0, index=5)

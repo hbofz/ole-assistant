@@ -25,8 +25,8 @@ COLLECTION = os.getenv("OLE_COLLECTION", "stolaf")  # build a new index under an
 DENSE_MODEL = "text-embedding-3-large"  # OpenAI; local CPU models were ~1 s per chunk
 DENSE_DIM = 1024
 SPARSE_MODEL = "Qdrant/bm25"
-RERANKER = os.getenv("OLE_RERANKER", "voyage")  # "voyage" (rerank-3, hosted) or "local" (MiniLM on CPU)
-VOYAGE_RERANK_MODEL = "rerank-3"
+RERANKER = os.getenv("OLE_RERANKER", "cloud")  # "cloud" (Cloudflare Workers AI, free tier) or "local" (MiniLM on CPU)
+CLOUD_RERANK_MODEL = "@cf/baai/bge-reranker-base"  # replaced Voyage rerank-3 (2026-11-03): eval reps ran up a $19 bill; Cloudflare's free tier errors instead of billing
 RERANK_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"  # bge-reranker-base took ~28 s per question on CPU
 
 ANSWER_MODEL = os.getenv("OLE_MODEL", "claude-haiku-5-5")  # Hamzah: same eval scores as Sonnet, ~20x cheaper
@@ -34,7 +34,7 @@ GRADER_MODEL = "claude-sonnet-5-5"
 REWRITE_MODEL = "claude-haiku-5-5"
 
 RETRIEVE_K = 40
-RERANK_K = int(os.getenv("OLE_RERANK_K", "60"))  # 0 turns the reranker off; 60 beat 20 on hit@8 (eval 2026-10-29)
+RERANK_K = int(os.getenv("OLE_RERANK_K", "30"))  # 0 turns the reranker off; with rank fusion 20 to 80 tie on train, 30 halves Cloudflare use (2026-11-03)
 ANSWER_K = 8
 PER_URL_MAX = 3
 LEFSE_PASSWORD = os.getenv("LEFSE_PASSWORD") or None  # set it to require a login (public link)

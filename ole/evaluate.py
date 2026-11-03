@@ -155,7 +155,7 @@ def compare(qset: str, a: str, b: str) -> dict:
 
 def report(out: dict) -> None:
     if out["rerank_fallbacks"]:
-        print(f"WARNING: Voyage failed {out['rerank_fallbacks']} times; those questions used the local reranker")
+        print(f"WARNING: the hosted reranker failed {out['rerank_fallbacks']} times; those questions used the local reranker")
     if "correct" not in out["summary"]:  # --retrieval-only
         print(f"\nretrieval {out['summary']['retrieval_hit']:.1%}")
         return

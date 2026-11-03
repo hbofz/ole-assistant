@@ -17,7 +17,7 @@ from datetime import date
 
 import httpx
 
-from ole.config import (RERANKER, VOYAGE_RERANK_MODEL, ANSWER_K, COLLECTION, DENSE_DIM, DENSE_MODEL, PER_URL_MAX, QDRANT_URL, RERANK_K, RERANK_MODEL,
+from ole.config import (RERANKER, CLOUD_RERANK_MODEL, ANSWER_K, COLLECTION, DENSE_DIM, DENSE_MODEL, PER_URL_MAX, QDRANT_URL, RERANK_K, RERANK_MODEL,
                         RETRIEVE_K, SPARSE_MODEL)
 
 EMBED_BATCH = 256
@@ -68,21 +68,24 @@ def http() -> httpx.Client:
     return httpx.Client(timeout=15)
 
 
-FALLBACKS = [0]  # times Voyage failed and the local reranker stood in (the eval reports it)
+# down, over the free allowance, no key, or a 200 with an error body (result null, bad id, not JSON)
+RERANK_ERRORS = (httpx.HTTPError, KeyError, TypeError, ValueError, IndexError)
+FALLBACKS = [0]  # times the hosted reranker failed and the local reranker stood in (the eval reports it)
 
 
-def voyage_scores(query: str, docs: list[str]) -> list[float]:
-    for wait in (1, 2, 0):  # bursts get 429s; a short wait beats the much weaker local reranker
-        r = http().post("https://api.voyageai.com/v1/rerank",
-                        headers={"Authorization": f"Bearer {os.environ['VOYAGE_API_KEY']}"},
-                        json={"query": query, "documents": docs, "model": VOYAGE_RERANK_MODEL, "truncation": True})
+def cloud_scores(query: str, docs: list[str]) -> list[float]:
+    """Cloudflare Workers AI rerank, 0-1 scores in input order. Past the free daily allowance it errors, never bills."""
+    url = f"https://api.cloudflare.com/client/v4/accounts/{os.environ['CLOUDFLARE_ACCOUNT_ID']}/ai/run/{CLOUD_RERANK_MODEL}"
+    for wait in (1, 2, 0):  # bursts get 429s; a short wait beats the much slower local reranker
+        r = http().post(url, headers={"Authorization": f"Bearer {os.environ['CLOUDFLARE_API_TOKEN']}"},
+                        json={"query": query, "contexts": [{"text": d} for d in docs], "top_k": len(docs)})
         if r.status_code != 429 or not wait:
             break
         time.sleep(wait)
     r.raise_for_status()
     scores = [0.0] * len(docs)
-    for d in r.json()["data"]:
-        scores[d["index"]] = d["relevance_score"]
+    for d in r.json()["result"]["response"]:
+        scores[d["id"]] = d["score"]
     return scores
 
 
@@ -91,12 +94,12 @@ def local_scores(query: str, docs: list[str]) -> list[float]:
 
 
 def rerank_scores(query: str, docs: list[str], which: str) -> list[float]:
-    if which == "voyage":
+    if which == "cloud":
         try:
-            return voyage_scores(query, docs)
-        except (httpx.HTTPError, KeyError) as e:  # Voyage down or no key: the local model still works
+            return cloud_scores(query, docs)
+        except RERANK_ERRORS as e:  # the local model still works
             FALLBACKS[0] += 1
-            print(f"[search] voyage rerank failed ({type(e).__name__}), using local reranker", file=sys.stderr, flush=True)
+            print(f"[search] cloud rerank failed ({type(e).__name__}), using local reranker", file=sys.stderr, flush=True)
     return local_scores(query, docs)
 
 
@@ -120,7 +123,8 @@ def diversify(hits: list[Hit], per_url: int = PER_URL_MAX) -> list[Hit]:
 # questions about dates, deadlines, hours, events or schedules are touched: the rewrite adds the current academic year
 # to exactly those, so its "2026-27" is the intent flag. Then an occasion page drops unless the question names its
 # occasion or any occasion, an old page unless it names a year or the past. Ungated, it cost answers on held-out.
-TYPE_PENALTY = 0.2  # on Voyage's 0-1 scale (eval 2026-10-29); ponytail: small next to MiniLM fallback logits
+TYPE_PENALTY = 0.2  # on the fused rank score (1 to 2); flat from 0.1 to 0.3 on train (eval 2026-11-03)
+FUSE_K = 60  # rank fusion constant, the usual RRF value
 OCCASION_WORDS = {"summer", "camp", "camps", "conference", "conferences", "reunion", "reunions", "homecoming", "alumni",
                   "interim", "break", "breaks", "guest", "guests", "archive", "archived", "old", "copy", "past", "thanksgiving",
                   "holiday", "holidays", "christmas", "winter", "family", "parents", "last", "previous", "j"}
@@ -170,8 +174,11 @@ def search(query: str, k: int = ANSWER_K, raw: str | None = None) -> list[Hit]:
     if RERANK_K and hits:  # 0 = trust the hybrid (RRF) order
         hits = hits[:RERANK_K]
         kinds = pagetypes.kinds(list({h.url for h in hits}))
-        for h, s in zip(hits, rerank_scores(question, [h.embed_text for h in hits], RERANKER)):
-            h.score = s - type_penalty(h, queries, kinds)
+        # bge-reranker alone ranked worse than the hybrid order (train hit@8 90 vs 97), so the two ranks are fused (98.5)
+        scores = rerank_scores(question, [h.embed_text for h in hits], RERANKER)
+        rerank_rank = {i: r for r, i in enumerate(sorted(range(len(hits)), key=lambda i: -scores[i]))}
+        for i, h in enumerate(hits):
+            h.score = FUSE_K / (FUSE_K + rerank_rank[i]) + FUSE_K / (FUSE_K + i) - type_penalty(h, queries, kinds)
         hits.sort(key=lambda h: h.score, reverse=True)
     return expand(diversify(hits)[:k], question)
 
@@ -193,8 +200,8 @@ def merge_neighbors(hits: list[Hit], texts: dict[tuple[str, int], str], far: set
 
 # A hit's answer can sit two chunks on: a page's "Stav Hall" card is one chunk, its "Dinner 4:30-8 p.m." column the
 # chunk after next, with no "Stav Hall" in it. Gluing that far blindly brought in other buildings' schedules and the
-# answers hedged, so Voyage reads the chunk after next under its hit's headings and it is glued only if relevant.
-NEIGHBOR_MIN = 0.6  # Voyage relevance (0-1) the chunk after next needs (eval 2026-10-29)
+# answers hedged, so the reranker reads the chunk after next under its hit's headings and it is glued only if relevant.
+NEIGHBOR_MIN = 0.6  # reranker relevance (0-1) the chunk after next needs; tuned on Voyage 2026-10-29, q40 still passes on bge (2026-11-03)
 
 
 def expand(hits: list[Hit], question: str | None = None) -> list[Hit]:
@@ -205,13 +212,13 @@ def expand(hits: list[Hit], question: str | None = None) -> list[Hit]:
     near = [(h, chunks[(h.url, h.index + 2)]) for h in hits if (h.url, h.index + 2) in chunks
             and (h.url, h.index + 1) in chunks and not {(h.url, h.index + 1), (h.url, h.index + 2)} & taken]
     far = set()
-    if question and near and RERANKER == "voyage":  # MiniLM scores aren't on a 0-1 scale
+    if question and near and RERANKER == "cloud":  # MiniLM scores aren't on a 0-1 scale
         docs = [f"{h.title}\n{h.heading_path}\n{c.get('heading_path') or ''}\n\n{c['text']}" for h, c in near]
         try:
-            far = {(h.url, h.index) for (h, _), s in zip(near, voyage_scores(question, docs)) if s >= NEIGHBOR_MIN}
-        except (httpx.HTTPError, KeyError) as e:  # the next and previous chunks still go in
+            far = {(h.url, h.index) for (h, _), s in zip(near, cloud_scores(question, docs)) if s >= NEIGHBOR_MIN}
+        except RERANK_ERRORS as e:  # the next and previous chunks still go in
             FALLBACKS[0] += 1
-            print(f"[search] voyage neighbor scoring failed ({type(e).__name__})", file=sys.stderr, flush=True)
+            print(f"[search] cloud neighbor scoring failed ({type(e).__name__})", file=sys.stderr, flush=True)
     return merge_neighbors(hits, {key: c["text"] for key, c in chunks.items()}, far)
 
 
@@ -219,4 +226,4 @@ def warmup() -> None:
     """Load the three local models so the first question isn't slow."""
     next(iter(sparse_model().query_embed("warm up")))
     if RERANK_K:
-        list(reranker().rerank("warm up", ["warm up"]))  # also the fallback when Voyage is unreachable
+        list(reranker().rerank("warm up", ["warm up"]))  # also the fallback when Cloudflare is unreachable

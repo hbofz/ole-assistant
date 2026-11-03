@@ -204,3 +204,11 @@ def test_rewrite_keeps_only_the_query_when_reasoning_leaks():
         fake.messages.create = lambda reply=reply, **kw: type("R", (), {
             "content": [type("T", (), {"type": "text", "text": reply})()], "usage": None})()
         assert rewrite_query([], "q", fake) == query
+
+
+def test_pinned_today_reaches_prompts_and_search_gate(monkeypatch):
+    from ole import pagetypes
+    from ole.answer import rewrite_prompt, system_prompt
+    monkeypatch.setenv("OLE_TODAY", "2031-03-02")
+    assert "2031-03-02" in system_prompt() and "2031-03-02" in rewrite_prompt()
+    assert pagetypes.year_tag() == "2030-31"

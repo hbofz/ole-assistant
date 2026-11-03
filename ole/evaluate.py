@@ -4,12 +4,16 @@ Run: uv run python -m ole.evaluate [--model claude-haiku-5-5] [--only ID ...] [-
 Answers are cached in data/eval_cache, so re-running after a grading change doesn't re-pay for answers.
 --rep N gets fresh answers (a separate cache slot), to measure answer noise; --retrieval-only skips answers and grading.
 eval/heldout.jsonl is held out: score it to confirm a gain, never tune on its failures.
+The bot is told EVAL_TODAY (--today to change), the date the expected answers were written for: as pages age the
+answers hedge differently, so an unpinned eval drifts day to day.
 """
 import argparse
 import hashlib
 import json
+import os
 import random
 import time
+from datetime import date
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -18,12 +22,13 @@ from ole import answer
 from ole.answer import answer_text, retrieve
 from ole.search import FALLBACKS
 from ole.claude_cli import ask
-from ole.config import ANSWER_MODEL, DATA_DIR, GRADER_MODEL, PROMPT_VERSION, ROOT
+from ole.config import ANSWER_MODEL, DATA_DIR, GRADER_MODEL, PROMPT_VERSION, ROOT, today
 
 QUESTIONS = ROOT / "eval" / "questions.jsonl"
 CACHE = DATA_DIR / "eval_cache"
 RUNS = DATA_DIR / "eval_runs"
 BARS = {"retrieval_hit": 0.90, "correct": 0.85}
+EVAL_TODAY = "2026-10-29"  # the expected answers' date; move it when you refresh them, within the labels' academic year
 PRICES = {"claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-5-5": (0.10, 0.50)}  # $ per 1M tokens in / out
 
 GRADER_PROMPT = """You grade answers from a St. Olaf College chatbot. Reply with JSON only.
@@ -42,7 +47,7 @@ GRADE_SCHEMA = {
 
 
 def cache_key(model: str, question: str, history: list, hit_ids: list[str], rep: int = 0) -> str:
-    blob = json.dumps([model, question, history, hit_ids, PROMPT_VERSION] + ([rep] if rep else []))
+    blob = json.dumps([model, question, history, hit_ids, PROMPT_VERSION, today().isoformat()] + ([rep] if rep else []))
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
@@ -63,7 +68,7 @@ def _grade_once(row: dict, reply: str) -> dict:
     expected = row["expected_answer"] if row["answerable"] else \
         "UNANSWERABLE. St. Olaf's public pages don't cover this (or it isn't about St. Olaf). The right behavior is to say so and decline."
     # graded on the subscription (headless Claude Code); answers stay on the API, the path being measured
-    return ask(f"Question: {row['question']}\n\nExpected: {expected}\n\nBot answer:\n{reply}", GRADER_PROMPT,
+    return ask(f"Today is {today().isoformat()}.\n\nQuestion: {row['question']}\n\nExpected: {expected}\n\nBot answer:\n{reply}", GRADER_PROMPT,
                GRADE_SCHEMA, model=GRADER_MODEL)
 
 
@@ -114,7 +119,8 @@ def score(row: dict, model: str, rep: int = 0, retrieval_only: bool = False, vot
 
 
 def run(model: str, only: set[str] | None = None, questions: Path = QUESTIONS, rep: int = 0,
-        retrieval_only: bool = False, workers: int = 6, votes: int = 3) -> dict:
+        retrieval_only: bool = False, workers: int = 6, votes: int = 3, today: str = EVAL_TODAY) -> dict:
+    os.environ["OLE_TODAY"] = today  # read by config.today(): the bot, the search gate and the grader
     CACHE.mkdir(parents=True, exist_ok=True)
     rows = [json.loads(l) for l in Path(questions).read_text().splitlines() if l.strip()]
     if only:
@@ -129,18 +135,21 @@ def run(model: str, only: set[str] | None = None, questions: Path = QUESTIONS, r
                   f"declined={res['declined']} | {res['reason'][:90]}", flush=True)
     ans = [r for r in results if r["answerable"]]
     summary = summarize(results) if not retrieval_only else {"retrieval_hit": sum(r["retrieval_hit"] for r in ans) / len(ans)}
-    return {"model": model, "questions": str(questions), "rep": rep, "summary": summary,
+    return {"model": model, "questions": str(questions), "rep": rep, "today": today, "summary": summary,
             "cost_usd": round(cost(), 4), "rerank_fallbacks": FALLBACKS[0], "results": results}
 
 
 def compare(qset: str, a: str, b: str) -> dict:
     """Paired comparison of two tagged configs on one question set: each item's correct rate averaged over
     its reps, then a bootstrap 95% CI of the mean difference (b - a) over items."""
+    dates = set()
+
     def load(tag):
         per = {}
         for f in RUNS.glob(f"*-{qset}-{tag}-rep*.json"):
             d = json.loads(f.read_text())
             if "correct" in d["summary"]:
+                dates.add(d.get("today", "unpinned"))
                 for r in d["results"]:
                     per.setdefault(r["id"], []).append(bool(r["correct"]))
         return {k: sum(v) / len(v) for k, v in per.items()}
@@ -150,7 +159,8 @@ def compare(qset: str, a: str, b: str) -> dict:
     rng = random.Random(0)
     boots = sorted(sum(rng.choice(diff) for _ in diff) / len(diff) for _ in range(10000))
     return {"a": sum(A[i] for i in ids) / len(ids), "b": sum(B[i] for i in ids) / len(ids), "diff": sum(diff) / len(diff),
-            "ci": (boots[250], boots[9750]), "better": [i for i in ids if B[i] > A[i]], "worse": [i for i in ids if B[i] < A[i]]}
+            "ci": (boots[250], boots[9750]), "better": [i for i in ids if B[i] > A[i]], "worse": [i for i in ids if B[i] < A[i]],
+            "dates": sorted(dates)}
 
 
 def report(out: dict) -> None:
@@ -174,7 +184,7 @@ def report(out: dict) -> None:
           f"confident wrong {s['confident_wrong']} -> {'PASS' if s['passed'] else 'FAIL'}  (spent ${out['cost_usd']:.2f})")
 
 
-if __name__ == "__main__":
+def main() -> None:
     p = argparse.ArgumentParser(description="Score Lefse against the eval set.")
     p.add_argument("--model", default=ANSWER_MODEL)
     p.add_argument("--only", nargs="*")
@@ -185,14 +195,22 @@ if __name__ == "__main__":
     p.add_argument("--votes", type=int, default=3, help="grades per answer, majority wins")
     p.add_argument("--tag", default="", help="label for the run file")
     p.add_argument("--compare", nargs=2, metavar=("TAG_A", "TAG_B"), help="compare two tagged configs' saved runs")
+    p.add_argument("--today", default=EVAL_TODAY, type=lambda s: date.fromisoformat(s).isoformat(),
+                   help="date the bot and grader are told (YYYY-MM-DD)")
     a = p.parse_args()
     if a.compare:
         c = compare(a.questions.stem, *a.compare)
         print(f"{a.questions.stem}: {a.compare[0]} {c['a']:.1%} -> {a.compare[1]} {c['b']:.1%}  diff {c['diff']:+.1%}  "
               f"95% CI [{c['ci'][0]:+.1%}, {c['ci'][1]:+.1%}]\n  better: {c['better']}\n  worse: {c['worse']}")
+        if len(c["dates"]) > 1:
+            print(f"  WARNING: these runs were answered under different dates {c['dates']}; the date alone moves scores")
         raise SystemExit
-    out = run(a.model, set(a.only) if a.only else None, a.questions, a.rep, a.retrieval_only, a.workers, a.votes)
+    out = run(a.model, set(a.only) if a.only else None, a.questions, a.rep, a.retrieval_only, a.workers, a.votes, a.today)
     RUNS.mkdir(parents=True, exist_ok=True)
     name = "-".join(x for x in (time.strftime('%Y%m%d-%H%M%S'), a.model, a.questions.stem, a.tag, f"rep{a.rep}") if x)
     (RUNS / f"{name}.json").write_text(json.dumps(out, indent=1))
     report(out)
+
+
+if __name__ == "__main__":
+    main()

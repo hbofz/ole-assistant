@@ -107,9 +107,12 @@ uv run python -m ole.evaluate --model claude-haiku-5-5
 uv run python -m ole.evaluate --questions eval/heldout.jsonl   # held-out set: confirm gains here, never tune on it
 uv run python -m ole.evaluate --rep 1          # fresh answers (own cache slot), to see answer noise
 uv run python -m ole.evaluate --retrieval-only # retrieval hit and rank only, ~30 s
+uv run python -m ole.evaluate --today 2026-11-03  # tell the bot (and grader) another date; the default is EVAL_TODAY
 ```
 
 The eval passes when retrieval finds the right page for at least 90% of answerable questions, at least 85% of answers are graded correct, and Lefse gives zero confident answers to questions the site can't answer. Each answer is graded 3 times by Claude Sonnet and the majority wins (`--votes`); the votes split on under 2% of answers. Most run-to-run noise comes from the answers and the query rewrite instead: the same setup scores 2 to 4 points apart between `--rep`s. So compare changes over several reps, on both sets.
+
+The eval tells the bot and the grader a fixed date (`EVAL_TODAY` in `ole/evaluate.py`, the date the expected answers were written for). Answers depend on the date: as pages age, the bot starts noting that a page shows last year's dates, and an expected answer written earlier counts that as a hedge. With the real date, held-out fell about 5 points in five days with nothing else changed (92.7% pinned vs 87.3% unpinned, same index). Move `EVAL_TODAY` when you refresh the expected answers. The pin removes date drift only: the nightly refresh still changes page content, so compare configs with runs from the same night, and `--compare` warns when the runs it pools were answered under different dates. Every eval question also calls the reranker, so check what a batch of reps will use before running it.
 
 ## Notes for a real deployment?
 

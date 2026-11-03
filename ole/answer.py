@@ -8,7 +8,7 @@ import anthropic
 
 from ole import conflicts
 from ole.pagetypes import year_tag
-from ole.config import ANSWER_MODEL, BOT_NAME, REWRITE_MODEL
+from ole.config import ANSWER_MODEL, BOT_NAME, REWRITE_MODEL, today as config_today
 from ole.search import Hit, search
 
 SYSTEM_PROMPT = """You are {bot}, a friendly helper for St. Olaf College students. You answer questions about St. Olaf: courses, majors and requirements, registration, credits, the Piper Center, internships, financial aid, campus life, offices and centers.
@@ -28,7 +28,7 @@ Rules:
 
 
 def system_prompt() -> str:
-    return SYSTEM_PROMPT.format(bot=BOT_NAME, today=date.today().isoformat())
+    return SYSTEM_PROMPT.format(bot=BOT_NAME, today=config_today().isoformat())
 
 
 REWRITE_PROMPT = """Turn a St. Olaf College student's latest message into a short search query (keywords, not a sentence) for searching St. Olaf's websites. Use the conversation to resolve follow-ups like "what about the minor?". Keep course codes, names and numbers exactly as written. Don't add "St. Olaf" or "college". Use St. Olaf's own terms when the student uses everyday words:
@@ -45,7 +45,7 @@ Reply with only the query."""
 
 def rewrite_prompt(today: date | None = None) -> str:
     # with the date, "when do juniors register" finds this year's calendar instead of an old one
-    d = today or date.today()
+    d = today or config_today()
     year = year_tag(d)  # search reads this tag back as "a question about dates or hours" (search.type_penalty)
     return (f"{REWRITE_PROMPT}\nToday is {d.isoformat()}, in the {year} academic year. For questions about dates, "
             f"deadlines, hours, events or schedules, add the current academic year ({year}) or term to the query.")

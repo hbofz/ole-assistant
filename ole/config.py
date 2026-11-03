@@ -1,4 +1,5 @@
 import os
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -40,3 +41,9 @@ PER_URL_MAX = 3
 LEFSE_PASSWORD = os.getenv("LEFSE_PASSWORD") or None  # set it to require a login (public link)
 PROMPT_VERSION = "v7"  # v4: conflict notes, v5: no personal records, v6: the current source wins conflicts, v7: same-fact conflicts only, old sole sources still answer
 BOT_NAME = "Lefse"
+
+
+def today() -> date:
+    """Today, or OLE_TODAY (YYYY-MM-DD). The eval pins it: answers hedge differently as pages age, and its expected
+    answers are a snapshot (held-out fell about 5 points between 2026-10-29 and 2026-11-03 from the date alone)."""
+    return date.fromisoformat(os.environ["OLE_TODAY"]) if os.getenv("OLE_TODAY") else date.today()

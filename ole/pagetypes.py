@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from ole.claude_cli import ask
-from ole.config import REWRITE_MODEL
+from ole.config import REWRITE_MODEL, today as config_today
 from ole.db import connect
 
 BATCH = 40
@@ -36,7 +36,7 @@ LABEL_SCHEMA = {"type": "object", "properties": {"pages": {"type": "array", "ite
 
 def academic_year(today: date | None = None) -> int:
     """The year the current academic year started (2026 for 2026-27)."""
-    d = today or date.today()
+    d = today or config_today()
     return d.year if d.month >= 8 else d.year - 1
 
 
@@ -74,7 +74,7 @@ def card(row: dict) -> str:
 
 
 def label(rows: list[dict]) -> list[tuple]:
-    system = PROMPT.format(today=date.today().isoformat(), year=year_tag(), start=academic_year())
+    system = PROMPT.format(today=config_today().isoformat(), year=year_tag(), start=academic_year())
     cards = "\n\n".join(f"[{i}] {card(r)}" for i, r in enumerate(rows))
     got = {p["i"]: p for p in ask(cards, system, LABEL_SCHEMA, model=REWRITE_MODEL)["pages"]}
     return [(r["url"], f"{r['hash']}:{year_tag()}", got[i]["kind"], got[i]["about"]) for i, r in enumerate(rows) if i in got]

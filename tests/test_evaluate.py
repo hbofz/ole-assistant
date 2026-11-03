@@ -111,3 +111,54 @@ def test_answer_cache_sees_hit_text(monkeypatch, tmp_path):
     monkeypatch.setattr(ev, "answer_text", lambda h, q, m, hits: answered.append(hits[0].text) or ("a", [], ["1"]))
     ev.score(row, "m"); ev.score(row, "m")
     assert len(answered) == 2
+
+
+def test_cache_key_depends_on_today(monkeypatch):
+    monkeypatch.setenv("OLE_TODAY", "2026-10-29")
+    a = cache_key("m", "q", [], ["a"])
+    monkeypatch.setenv("OLE_TODAY", "2026-11-03")
+    assert cache_key("m", "q", [], ["a"]) != a  # answers depend on the date the bot is told
+
+
+def test_run_pins_today(monkeypatch, tmp_path):
+    import json
+    import ole.evaluate as ev
+    monkeypatch.setenv("OLE_TODAY", "2001-01-01")  # teardown restores it
+    qs = tmp_path / "q.jsonl"
+    qs.write_text(json.dumps({"id": "x1", "question": "q?", "expected_urls": ["https://a/"], "answerable": True}) + "\n")
+    monkeypatch.setattr(ev, "retrieve", lambda h, q: [])
+    assert ev.run("m", questions=qs, retrieval_only=True)["today"] == ev.EVAL_TODAY
+    assert ev.run("m", questions=qs, retrieval_only=True, today="2026-11-03")["today"] == "2026-11-03"
+
+
+def test_bad_today_fails_before_any_work(monkeypatch):
+    import sys
+    import pytest
+    import ole.evaluate as ev
+    monkeypatch.setattr(sys, "argv", ["ole.evaluate", "--today", "11/03/2026"])
+    monkeypatch.setattr(ev, "run", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("ran")))
+    with pytest.raises(SystemExit) as e:
+        ev.main()
+    assert e.value.code == 2
+
+
+def test_compare_flags_runs_from_different_dates(monkeypatch, tmp_path):
+    import json
+    import ole.evaluate as ev
+    monkeypatch.setattr(ev, "RUNS", tmp_path)
+    for tag, rep, today in (("a", 0, "2026-10-29"), ("b", 0, "2026-10-29"), ("b", 1, None)):
+        d = {"summary": {"correct": 1}, "results": [{"id": "x", "correct": True}]} | ({"today": today} if today else {})
+        (tmp_path / f"t-m-heldout-{tag}-rep{rep}.json").write_text(json.dumps(d))
+    assert ev.compare("heldout", "a", "b")["dates"] == ["2026-10-29", "unpinned"]
+    (tmp_path / "t-m-heldout-b-rep1.json").unlink()
+    assert ev.compare("heldout", "a", "b")["dates"] == ["2026-10-29"]
+
+
+def test_grader_is_told_the_pinned_date(monkeypatch):
+    import ole.evaluate as ev
+    seen = {}
+    monkeypatch.setattr(ev, "ask", lambda prompt, *a, **kw: seen.setdefault("p", prompt) and
+                        {"correct": True, "declined": False, "reason": "ok"})
+    monkeypatch.setenv("OLE_TODAY", "2026-10-29")
+    ev.grade({"question": "q", "expected_answer": "x", "answerable": True}, "x", votes=1)
+    assert seen["p"].startswith("Today is 2026-10-29.")
